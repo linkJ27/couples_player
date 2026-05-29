@@ -37,6 +37,19 @@ export interface FileMatchResult {
   confidence: "quick" | "strict";
 }
 
+export interface MediaPresenceItem {
+  mediaId: string;
+  name: string;
+  size: number;
+  durationMs?: number;
+}
+
+export interface MemberMediaPresence {
+  memberId: string;
+  displayName: string;
+  media: MediaPresenceItem[];
+}
+
 export interface ReactionMessage {
   reactionId: string;
   senderId: string;
@@ -51,6 +64,7 @@ export interface RoomSnapshotMessage {
   mode: RoomMode;
   leaderId: string | null;
   playbackSnapshot: PlaybackSnapshot | null;
+  mediaPresence: MemberMediaPresence[];
 }
 
 export type RealtimeClientMessage =
@@ -78,6 +92,12 @@ export type RealtimeClientMessage =
       clientSentAt: number;
     }
   | {
+      type: "media.presence";
+      roomId: string;
+      memberId: string;
+      media: MediaPresenceItem[];
+    }
+  | {
       type: "playback.broadcast";
       roomId: string;
       memberId: string;
@@ -99,6 +119,7 @@ export type RealtimeServerMessage =
       mode: RoomMode;
       leaderId: string | null;
       playbackSnapshot: PlaybackSnapshot | null;
+      mediaPresence: MemberMediaPresence[];
     }
   | {
       type: "peer.count";
@@ -114,6 +135,11 @@ export type RealtimeServerMessage =
       pingId: string;
       clientSentAt: number;
       serverTimeMs: number;
+    }
+  | {
+      type: "media.presence";
+      roomId: string;
+      mediaPresence: MemberMediaPresence[];
     }
   | {
       type: "playback.remote";

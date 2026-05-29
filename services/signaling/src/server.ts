@@ -73,7 +73,8 @@ function handleMessage(session: ClientSession, message: RealtimeClientMessage) {
     const snapshot = store.join(roomId, {
       memberId: message.memberId,
       sessionId: message.sessionId,
-      displayName: message.displayName
+      displayName: message.displayName,
+      media: []
     });
     send(session, {
       type: "room.joined",
@@ -82,7 +83,8 @@ function handleMessage(session: ClientSession, message: RealtimeClientMessage) {
       peerCount: snapshot.members.length,
       mode: snapshot.mode,
       leaderId: snapshot.leaderId,
-      playbackSnapshot: snapshot.playbackSnapshot
+      playbackSnapshot: snapshot.playbackSnapshot,
+      mediaPresence: snapshot.mediaPresence
     });
     broadcastRoomSnapshot(roomId);
     return;
@@ -120,6 +122,13 @@ function handleMessage(session: ClientSession, message: RealtimeClientMessage) {
     return;
   }
 
+  if (message.type === "media.presence") {
+    store.updateMediaPresence(session.roomId, session.memberId, message.media);
+    broadcastMediaPresence(session.roomId);
+    broadcastRoomSnapshot(session.roomId);
+    return;
+  }
+
   if (message.type === "playback.broadcast") {
     if (!store.canBroadcastPlayback(session.roomId, session.memberId)) {
       send(session, { type: "room.error", message: "Only the leader can control playback in leader mode" });
@@ -142,6 +151,19 @@ function handleMessage(session: ClientSession, message: RealtimeClientMessage) {
       memberId: session.memberId,
       reaction: message.reaction
     });
+  }
+}
+
+function broadcastMediaPresence(roomId: string) {
+  const snapshot = store.toMessage(roomId);
+  for (const session of sessions) {
+    if (session.roomId === roomId) {
+      send(session, {
+        type: "media.presence",
+        roomId,
+        mediaPresence: snapshot.mediaPresence
+      });
+    }
   }
 }
 

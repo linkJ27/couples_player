@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  MediaPresenceItem,
   PlaybackSnapshot,
   RealtimeClientMessage,
   RealtimeServerMessage,
@@ -90,7 +91,8 @@ export function useRoomSync(roomCode: string) {
           peerCount: message.peerCount,
           mode: message.mode,
           leaderId: message.leaderId,
-          playbackSnapshot: message.playbackSnapshot
+          playbackSnapshot: message.playbackSnapshot,
+          mediaPresence: message.mediaPresence
         });
       }
 
@@ -183,6 +185,17 @@ export function useRoomSync(roomCode: string) {
     [memberId, roomCode, send]
   );
 
+  const broadcastMediaPresence = useCallback(
+    (media: MediaPresenceItem[]) =>
+      send({
+        type: "media.presence",
+        roomId: roomCode,
+        memberId,
+        media
+      }),
+    [memberId, roomCode, send]
+  );
+
   const setRoomMode = useCallback(
     (mode: RoomMode) =>
       send({
@@ -219,6 +232,7 @@ export function useRoomSync(roomCode: string) {
 
   return {
     broadcastPlayback,
+    broadcastMediaPresence,
     broadcastReaction,
     claimLeader,
     clockOffsetMs,

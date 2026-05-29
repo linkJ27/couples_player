@@ -19,9 +19,11 @@ import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "
 import { classifyDrift, createPlaybackSnapshot } from "@couples-player/protocol";
 import {
   createPlaylistItems,
+  countPeersWithMedia,
   formatBytes,
   formatTime,
   inferNextEpisodeIndex,
+  toMediaPresence,
   type PlaylistItem
 } from "./media";
 import { useRoomSync } from "./useRoomSync";
@@ -53,6 +55,13 @@ export function App() {
   const isRoomLeader = roomSync.leaderId === roomSync.memberId;
   const canControlPlayback =
     roomSync.connectionState !== "connected" || roomSync.roomMode === "free" || isRoomLeader;
+  const peerMatchCount = countPeersWithMedia(
+    activeItem?.id ?? null,
+    roomSync.roomSnapshot?.mediaPresence ?? [],
+    roomSync.memberId
+  );
+  const peerNeedsCurrentMedia =
+    roomSync.connectionState === "connected" && activeItem && roomSync.peerCount > 1 && peerMatchCount === 0;
   const driftMs = isPlaying ? 126 : 34;
   const correction = classifyDrift(driftMs);
   const snapshot = useMemo(
@@ -168,6 +177,12 @@ export function App() {
     video.volume = volume;
     video.playbackRate = playbackRate;
   }, [playbackRate, volume]);
+
+  useEffect(() => {
+    if (roomSync.connectionState === "connected") {
+      roomSync.broadcastMediaPresence(toMediaPresence(playlist));
+    }
+  }, [playlist, roomSync.broadcastMediaPresence, roomSync.connectionState]);
 
   useEffect(() => {
     const event = roomSync.lastRemoteReaction;
@@ -450,6 +465,15 @@ export function App() {
               <strong>{activeItem.name}</strong>
               <span>{formatBytes(activeItem.size)}</span>
               <small>{activeItem.id}</small>
+              <em className={peerNeedsCurrentMedia ? "match-warning" : "match-ok"}>
+                {roomSync.connectionState !== "connected"
+                  ? "本地匹配就绪"
+                  : peerMatchCount > 0
+                    ? `${peerMatchCount} 个对方设备已匹配`
+                    : roomSync.peerCount > 1
+                      ? "对方缺少当前文件"
+                      : "等待对方加入"}
+              </em>
             </div>
           ) : (
             <p className="muted">还没有选择视频。</p>

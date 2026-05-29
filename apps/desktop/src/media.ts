@@ -1,4 +1,5 @@
 import { quickMediaFingerprint } from "@couples-player/protocol";
+import type { MediaPresenceItem, MemberMediaPresence } from "@couples-player/protocol";
 
 export interface PlaylistItem {
   id: string;
@@ -68,7 +69,29 @@ export function inferNextEpisodeIndex(items: PlaylistItem[], currentIndex: numbe
   return currentIndex >= items.length - 1 ? 0 : currentIndex + 1;
 }
 
+export function toMediaPresence(items: PlaylistItem[]): MediaPresenceItem[] {
+  return items.map((item) => ({
+    mediaId: item.id,
+    name: item.name,
+    size: item.size,
+    durationMs: item.durationMs
+  }));
+}
+
+export function countPeersWithMedia(
+  mediaId: string | null,
+  mediaPresence: MemberMediaPresence[],
+  localMemberId: string
+): number {
+  if (!mediaId) {
+    return 0;
+  }
+
+  return mediaPresence.filter(
+    (member) => member.memberId !== localMemberId && member.media.some((item) => item.mediaId === mediaId)
+  ).length;
+}
+
 function pad(value: number): string {
   return value.toString().padStart(2, "0");
 }
-

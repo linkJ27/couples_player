@@ -2,6 +2,8 @@ export type {
   DriftCorrection,
   FileMatchInput,
   FileMatchResult,
+  MediaPresenceItem,
+  MemberMediaPresence,
   PlaybackSnapshot,
   PlaybackState,
   PlaybackSyncCommand,

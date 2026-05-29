@@ -15,7 +15,8 @@ describe("RoomStore", () => {
       store.join("love1", {
         memberId: "a",
         sessionId: "s-a",
-        displayName: "A"
+        displayName: "A",
+        media: []
       }).members
     ).toHaveLength(1);
 
@@ -23,7 +24,8 @@ describe("RoomStore", () => {
       store.join("LOVE1", {
         memberId: "b",
         sessionId: "s-b",
-        displayName: "B"
+        displayName: "B",
+        media: []
       }).members
     ).toHaveLength(2);
 
@@ -45,12 +47,44 @@ describe("RoomStore", () => {
       leaderId: "b"
     };
     store.updatePlayback("love1", playbackSnapshot);
+    store.updateMediaPresence("love1", "a", [
+      {
+        mediaId: "quick:e1",
+        name: "Show.S01E01.mp4",
+        size: 1024
+      }
+    ]);
+    store.updateMediaPresence("love1", "b", [
+      {
+        mediaId: "quick:e1",
+        name: "Different.Name.mp4",
+        size: 1024
+      },
+      {
+        mediaId: "quick:e2",
+        name: "Show.S01E02.mp4",
+        size: 2048
+      }
+    ]);
+    expect(store.hasPeerMedia("love1", "a", "quick:e1")).toBe(true);
+    expect(store.hasPeerMedia("love1", "a", "quick:e2")).toBe(true);
+    expect(store.hasPeerMedia("love1", "b", "quick:e2")).toBe(false);
     expect(store.toMessage("love1")).toMatchObject({
       roomId: "LOVE1",
       peerCount: 2,
       mode: "free",
       leaderId: "b",
-      playbackSnapshot
+      playbackSnapshot,
+      mediaPresence: [
+        {
+          memberId: "a",
+          media: [{ mediaId: "quick:e1" }]
+        },
+        {
+          memberId: "b",
+          media: [{ mediaId: "quick:e1" }, { mediaId: "quick:e2" }]
+        }
+      ]
     });
     expect(store.leave("love1", "a")?.members.map((member) => member.memberId)).toEqual(["b"]);
     expect(store.leave("love1", "b")?.members).toEqual([]);

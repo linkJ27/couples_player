@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatTime, inferNextEpisodeIndex } from "./media";
+import { countPeersWithMedia, formatBytes, formatTime, inferNextEpisodeIndex, toMediaPresence } from "./media";
 
 describe("media formatting", () => {
   it("formats playback time", () => {
@@ -27,3 +27,40 @@ describe("playlist navigation", () => {
   });
 });
 
+describe("media presence", () => {
+  it("maps playlist items into shareable presence without local paths", () => {
+    const presence = toMediaPresence([
+      {
+        id: "quick:1",
+        name: "Show.S01E01.mp4",
+        size: 1024,
+        lastModified: 1,
+        url: "blob:local",
+        durationMs: 60_000
+      }
+    ]);
+
+    expect(presence).toEqual([
+      {
+        mediaId: "quick:1",
+        name: "Show.S01E01.mp4",
+        size: 1024,
+        durationMs: 60_000
+      }
+    ]);
+  });
+
+  it("counts only peers who have the requested media", () => {
+    expect(
+      countPeersWithMedia(
+        "quick:1",
+        [
+          { memberId: "local", displayName: "Local", media: [{ mediaId: "quick:1", name: "a", size: 1 }] },
+          { memberId: "peer-a", displayName: "A", media: [{ mediaId: "quick:1", name: "b", size: 1 }] },
+          { memberId: "peer-b", displayName: "B", media: [{ mediaId: "quick:2", name: "c", size: 1 }] }
+        ],
+        "local"
+      )
+    ).toBe(1);
+  });
+});

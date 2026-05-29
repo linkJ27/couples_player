@@ -1,9 +1,16 @@
-import type { PlaybackSnapshot, RoomMode, RoomSnapshotMessage } from "@couples-player/protocol";
+import type {
+  MediaPresenceItem,
+  MemberMediaPresence,
+  PlaybackSnapshot,
+  RoomMode,
+  RoomSnapshotMessage
+} from "@couples-player/protocol";
 
 export interface RoomMember {
   memberId: string;
   sessionId: string;
   displayName: string;
+  media: MediaPresenceItem[];
 }
 
 export interface RoomSnapshot {
@@ -12,6 +19,7 @@ export interface RoomSnapshot {
   mode: RoomMode;
   leaderId: string | null;
   playbackSnapshot: PlaybackSnapshot | null;
+  mediaPresence: MemberMediaPresence[];
 }
 
 export class RoomStore {
@@ -58,7 +66,8 @@ export class RoomStore {
         members: [],
         mode: room.mode,
         leaderId: null,
-        playbackSnapshot: room.playbackSnapshot
+        playbackSnapshot: room.playbackSnapshot,
+        mediaPresence: []
       };
     }
 
@@ -98,6 +107,30 @@ export class RoomStore {
     return this.snapshot(roomId);
   }
 
+  updateMediaPresence(roomId: string, memberId: string, media: MediaPresenceItem[]): RoomSnapshot {
+    const room = this.ensureRoom(roomId);
+    const member = room.members.get(memberId);
+    if (member) {
+      member.media = dedupeMedia(media);
+    }
+    return this.snapshot(roomId);
+  }
+
+  hasPeerMedia(roomId: string, memberId: string, mediaId: string): boolean {
+    const room = this.rooms.get(normalizeRoomId(roomId));
+    if (!room) {
+      return false;
+    }
+
+    for (const member of room.members.values()) {
+      if (member.memberId !== memberId && member.media.some((item) => item.mediaId === mediaId)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   snapshot(roomId: string): RoomSnapshot {
     const normalizedRoomId = normalizeRoomId(roomId);
     const room = this.rooms.get(normalizedRoomId);
@@ -106,7 +139,8 @@ export class RoomStore {
       members: room ? Array.from(room.members.values()) : [],
       mode: room?.mode ?? "leader",
       leaderId: room?.leaderId ?? null,
-      playbackSnapshot: room?.playbackSnapshot ?? null
+      playbackSnapshot: room?.playbackSnapshot ?? null,
+      mediaPresence: room ? toMediaPresence(Array.from(room.members.values())) : []
     };
   }
 
@@ -117,7 +151,8 @@ export class RoomStore {
       peerCount: snapshot.members.length,
       mode: snapshot.mode,
       leaderId: snapshot.leaderId,
-      playbackSnapshot: snapshot.playbackSnapshot
+      playbackSnapshot: snapshot.playbackSnapshot,
+      mediaPresence: snapshot.mediaPresence
     };
   }
 
@@ -141,4 +176,20 @@ export class RoomStore {
 
 export function normalizeRoomId(roomId: string): string {
   return roomId.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
+}
+
+function dedupeMedia(media: MediaPresenceItem[]): MediaPresenceItem[] {
+  const byId = new Map<string, MediaPresenceItem>();
+  for (const item of media) {
+    byId.set(item.mediaId, item);
+  }
+  return Array.from(byId.values()).slice(0, 200);
+}
+
+function toMediaPresence(members: RoomMember[]): MemberMediaPresence[] {
+  return members.map((member) => ({
+    memberId: member.memberId,
+    displayName: member.displayName,
+    media: member.media
+  }));
 }

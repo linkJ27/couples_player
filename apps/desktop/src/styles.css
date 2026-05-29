@@ -396,6 +396,25 @@ h2 {
   color: #68736f;
 }
 
+.file-match em {
+  border-radius: 999px;
+  justify-self: start;
+  padding: 3px 8px;
+  font-size: 0.78rem;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.match-ok {
+  background: #e5f4ec;
+  color: #1e6f48;
+}
+
+.match-warning {
+  background: #fff1e8;
+  color: #b44b31;
+}
+
 .file-match small {
   overflow-wrap: anywhere;
 }
