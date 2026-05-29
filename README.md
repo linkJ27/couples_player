@@ -31,6 +31,7 @@
 - [同步协议](docs/sync-protocol.md)
 - [开发路线](docs/development-plan.md)
 - [隐私与安全边界](docs/security-privacy.md)
+- [Git 工作流](docs/git-workflow.md)
 
 ## 仓库结构
 
@@ -43,4 +44,3 @@ packages/
   protocol/         # 共享协议、schema、类型定义
 docs/               # 设计与开发文档
 ```
-
