@@ -24,6 +24,17 @@
 - 协议：TypeScript/Rust 双端共享 JSON schema 或 protobuf。
 - 文件指纹：BLAKE3 或 xxHash3 分段 hash。
 
+## 当前实现
+
+当前仓库已落地第一版 React/TypeScript 播放器原型和共享同步协议包。桌面端先以 Vite 应用运行，后续接入 Tauri shell 和 mpv 播放内核。
+
+```powershell
+npm.cmd install
+npm.cmd run dev
+npm.cmd test
+npm.cmd run build
+```
+
 ## 文档
 
 - [产品与 MVP](docs/product-mvp.md)

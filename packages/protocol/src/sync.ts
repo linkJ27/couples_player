@@ -1,0 +1,110 @@
+import type {
+  DriftCorrection,
+  FileMatchInput,
+  FileMatchResult,
+  PlaybackSnapshot,
+  PlaybackState,
+  PlaybackSyncCommand
+} from "./types";
+
+export function createPlaybackSnapshot(input: {
+  version?: number;
+  epoch?: number;
+  state: PlaybackState;
+  mediaId: string | null;
+  mediaTimeMs: number;
+  roomTimeMs: number;
+  playbackRate?: number;
+  leaderId: string;
+}): PlaybackSnapshot {
+  return {
+    version: input.version ?? 1,
+    epoch: input.epoch ?? 1,
+    state: input.state,
+    mediaId: input.mediaId,
+    anchorMediaTimeMs: clampNonNegative(input.mediaTimeMs),
+    anchorRoomTimeMs: clampNonNegative(input.roomTimeMs),
+    playbackRate: input.playbackRate ?? 1,
+    leaderId: input.leaderId
+  };
+}
+
+export function projectMediaTime(snapshot: PlaybackSnapshot, roomTimeMs: number): number {
+  if (snapshot.state !== "playing") {
+    return snapshot.anchorMediaTimeMs;
+  }
+
+  const elapsedMs = Math.max(0, roomTimeMs - snapshot.anchorRoomTimeMs);
+  return snapshot.anchorMediaTimeMs + elapsedMs * snapshot.playbackRate;
+}
+
+export function classifyDrift(driftMs: number): {
+  correction: DriftCorrection;
+  temporaryRate: number;
+} {
+  const absDrift = Math.abs(driftMs);
+
+  if (absDrift <= 80) {
+    return { correction: "none", temporaryRate: 1 };
+  }
+
+  if (absDrift > 250) {
+    return { correction: "seek", temporaryRate: 1 };
+  }
+
+  return driftMs > 0
+    ? { correction: "speed-up", temporaryRate: 1.03 }
+    : { correction: "slow-down", temporaryRate: 0.97 };
+}
+
+export function estimateClockOffset(input: {
+  localSentMs: number;
+  remoteReceivedMs: number;
+  localReceivedMs: number;
+}): number {
+  const roundTripMs = Math.max(0, input.localReceivedMs - input.localSentMs);
+  return input.remoteReceivedMs - (input.localSentMs + roundTripMs / 2);
+}
+
+export function resolveCommandOrder(
+  left: PlaybackSyncCommand,
+  right: PlaybackSyncCommand
+): PlaybackSyncCommand {
+  if (left.epoch !== right.epoch) {
+    return left.epoch > right.epoch ? left : right;
+  }
+
+  if (left.logicalClock !== right.logicalClock) {
+    return left.logicalClock > right.logicalClock ? left : right;
+  }
+
+  return left.senderId.localeCompare(right.senderId) >= 0 ? left : right;
+}
+
+export function quickMediaFingerprint(file: FileMatchInput): FileMatchResult {
+  const duration = Math.round(file.durationMs ?? 0);
+  const normalizedName = file.name.trim().toLowerCase();
+  const raw = `${normalizedName}:${file.size}:${file.lastModified}:${duration}`;
+
+  return {
+    mediaId: `quick:${hashString(raw)}`,
+    label: file.name,
+    confidence: "quick"
+  };
+}
+
+function clampNonNegative(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function hashString(value: string): string {
+  let hash = 2166136261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+

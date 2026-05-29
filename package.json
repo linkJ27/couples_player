@@ -1,0 +1,23 @@
+{
+  "name": "couples-player",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/desktop",
+    "packages/protocol"
+  ],
+  "scripts": {
+    "dev": "npm --workspace apps/desktop run dev",
+    "build": "npm --workspaces run build",
+    "test": "npm --workspaces run test",
+    "typecheck": "npm --workspaces run typecheck"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.6",
+    "vitest": "^4.0.16"
+  }
+}
+
