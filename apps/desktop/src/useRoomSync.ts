@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createControlRequest } from "@couples-player/protocol";
+import { createControlRequest, parseDataChannelSyncMessage } from "@couples-player/protocol";
 import type {
   ControlRequestMessage,
+  DataChannelSyncMessage,
   MediaPresenceItem,
   PlaybackSnapshot,
   PlaylistEntry,
@@ -9,10 +10,12 @@ import type {
   RealtimeServerMessage,
   ReactionMessage,
   RoomMode,
-  RoomSnapshotMessage
+  RoomSnapshotMessage,
+  WebRtcSignalMessage
 } from "@couples-player/protocol";
 
 type ConnectionState = "idle" | "connecting" | "connected" | "disconnected" | "error";
+type DataChannelState = "idle" | "connecting" | "connected";
 
 export interface RemotePlaybackEvent {
   memberId: string;
@@ -35,11 +38,16 @@ export interface RemoteControlRequestEvent {
 const signalingUrl = import.meta.env.VITE_SIGNALING_URL ?? "ws://127.0.0.1:8787";
 const reconnectDelayMs = 1_500;
 const clockPingIntervalMs = 2_500;
+const rtcConfig: RTCConfiguration = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+};
 
 export function useRoomSync(roomCode: string) {
   const memberId = useMemo(() => getStableId("couples-player:member-id"), []);
   const sessionId = useMemo(() => getStableId("couples-player:session-id"), []);
   const socketRef = useRef<WebSocket | null>(null);
+  const peerConnectionsRef = useRef(new Map<string, RTCPeerConnection>());
+  const dataChannelsRef = useRef(new Map<string, RTCDataChannel>());
   const shouldReconnectRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
   const pingTimerRef = useRef<number | null>(null);
@@ -51,6 +59,7 @@ export function useRoomSync(roomCode: string) {
   const [lastRemotePlayback, setLastRemotePlayback] = useState<RemotePlaybackEvent | null>(null);
   const [lastRemoteReaction, setLastRemoteReaction] = useState<RemoteReactionEvent | null>(null);
   const [lastRemoteControlRequest, setLastRemoteControlRequest] = useState<RemoteControlRequestEvent | null>(null);
+  const [dataChannelState, setDataChannelState] = useState<DataChannelState>("idle");
 
   const send = useCallback((message: RealtimeClientMessage) => {
     const socket = socketRef.current;
@@ -61,6 +70,186 @@ export function useRoomSync(roomCode: string) {
     socket.send(JSON.stringify(message));
     return true;
   }, []);
+
+  const sendPeerMessage = useCallback((message: DataChannelSyncMessage, targetMemberId?: string) => {
+    let delivered = false;
+    for (const [peerId, channel] of dataChannelsRef.current) {
+      if (targetMemberId && peerId !== targetMemberId) {
+        continue;
+      }
+
+      if (channel.readyState === "open") {
+        channel.send(JSON.stringify(message));
+        delivered = true;
+      }
+    }
+
+    return delivered;
+  }, []);
+
+  const handlePeerMessage = useCallback((peerId: string, raw: string) => {
+    const message = parseDataChannelMessage(raw);
+    if (!message) {
+      return;
+    }
+
+    if (message.memberId === memberId) {
+      return;
+    }
+
+    if (message.type === "p2p.playback") {
+      setLastRemotePlayback({
+        memberId: message.memberId,
+        snapshot: message.snapshot,
+        receivedAt: Date.now()
+      });
+    }
+
+    if (message.type === "p2p.reaction") {
+      setLastRemoteReaction({
+        memberId: message.memberId,
+        reaction: message.reaction,
+        receivedAt: Date.now()
+      });
+    }
+
+    if (message.type === "p2p.control_request") {
+      setLastRemoteControlRequest({
+        memberId: peerId,
+        request: message.request,
+        receivedAt: Date.now()
+      });
+    }
+  }, [memberId]);
+
+  const refreshDataChannelState = useCallback(() => {
+    const hasOpenChannel = Array.from(dataChannelsRef.current.values()).some((channel) => channel.readyState === "open");
+    if (hasOpenChannel) {
+      setDataChannelState("connected");
+      return;
+    }
+
+    setDataChannelState(peerConnectionsRef.current.size > 0 ? "connecting" : "idle");
+  }, []);
+
+  const attachDataChannel = useCallback(
+    (peerId: string, channel: RTCDataChannel) => {
+      dataChannelsRef.current.set(peerId, channel);
+      channel.addEventListener("open", refreshDataChannelState);
+      channel.addEventListener("close", () => {
+        dataChannelsRef.current.delete(peerId);
+        refreshDataChannelState();
+      });
+      channel.addEventListener("message", (event) => {
+        if (typeof event.data === "string") {
+          handlePeerMessage(peerId, event.data);
+        }
+      });
+      refreshDataChannelState();
+    },
+    [handlePeerMessage, refreshDataChannelState]
+  );
+
+  const sendWebRtcSignal = useCallback(
+    (targetMemberId: string, signal: WebRtcSignalMessage) =>
+      send({
+        type: "webrtc.signal",
+        roomId: roomCode,
+        memberId,
+        targetMemberId,
+        signal
+      }),
+    [memberId, roomCode, send]
+  );
+
+  const ensurePeerConnection = useCallback(
+    (peerId: string) => {
+      const existing = peerConnectionsRef.current.get(peerId);
+      if (existing) {
+        return existing;
+      }
+
+      const connection = new RTCPeerConnection(rtcConfig);
+      peerConnectionsRef.current.set(peerId, connection);
+      setDataChannelState("connecting");
+
+      connection.addEventListener("icecandidate", (event) => {
+        if (event.candidate) {
+          sendWebRtcSignal(peerId, {
+            signalId: crypto.randomUUID(),
+            type: "ice",
+            candidate: event.candidate.toJSON()
+          });
+        }
+      });
+      connection.addEventListener("connectionstatechange", () => {
+        if (["closed", "failed", "disconnected"].includes(connection.connectionState)) {
+          peerConnectionsRef.current.delete(peerId);
+          dataChannelsRef.current.delete(peerId);
+        }
+        refreshDataChannelState();
+      });
+      connection.addEventListener("datachannel", (event) => {
+        attachDataChannel(peerId, event.channel);
+      });
+
+      return connection;
+    },
+    [attachDataChannel, refreshDataChannelState, sendWebRtcSignal]
+  );
+
+  const startPeerConnection = useCallback(
+    async (peerId: string) => {
+      if (!("RTCPeerConnection" in window) || peerConnectionsRef.current.has(peerId)) {
+        return;
+      }
+
+      const connection = ensurePeerConnection(peerId);
+      const channel = connection.createDataChannel("couples-player-sync", { ordered: true });
+      attachDataChannel(peerId, channel);
+      const offer = await connection.createOffer();
+      await connection.setLocalDescription(offer);
+      if (connection.localDescription) {
+        sendWebRtcSignal(peerId, {
+          signalId: crypto.randomUUID(),
+          type: "offer",
+          description: connection.localDescription.toJSON()
+        });
+      }
+    },
+    [attachDataChannel, ensurePeerConnection, sendWebRtcSignal]
+  );
+
+  const handleWebRtcSignal = useCallback(
+    async (peerId: string, signal: WebRtcSignalMessage) => {
+      if (!("RTCPeerConnection" in window)) {
+        return;
+      }
+
+      const connection = ensurePeerConnection(peerId);
+      if (signal.type === "offer" && signal.description) {
+        await connection.setRemoteDescription(signal.description);
+        const answer = await connection.createAnswer();
+        await connection.setLocalDescription(answer);
+        if (connection.localDescription) {
+          sendWebRtcSignal(peerId, {
+            signalId: crypto.randomUUID(),
+            type: "answer",
+            description: connection.localDescription.toJSON()
+          });
+        }
+      }
+
+      if (signal.type === "answer" && signal.description) {
+        await connection.setRemoteDescription(signal.description);
+      }
+
+      if (signal.type === "ice" && signal.candidate) {
+        await connection.addIceCandidate(signal.candidate);
+      }
+    },
+    [ensurePeerConnection, sendWebRtcSignal]
+  );
 
   const connect = useCallback(() => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -156,6 +345,10 @@ export function useRoomSync(roomCode: string) {
         });
       }
 
+      if (message.type === "webrtc.signal") {
+        void handleWebRtcSignal(message.memberId, message.signal);
+      }
+
       if (message.type === "room.error") {
         setConnectionState("error");
       }
@@ -177,7 +370,7 @@ export function useRoomSync(roomCode: string) {
     socket.addEventListener("error", () => {
       setConnectionState("error");
     });
-  }, [memberId, roomCode, send, sessionId]);
+  }, [handleWebRtcSignal, memberId, roomCode, send, sessionId]);
 
   const disconnect = useCallback(() => {
     shouldReconnectRef.current = false;
@@ -191,47 +384,82 @@ export function useRoomSync(roomCode: string) {
     }
     socketRef.current?.close();
     socketRef.current = null;
+    closePeerConnections(peerConnectionsRef.current, dataChannelsRef.current);
+    setDataChannelState("idle");
     setConnectionState("disconnected");
     setPeerCount(1);
   }, []);
 
   const broadcastPlayback = useCallback(
-    (snapshot: PlaybackSnapshot) =>
-      send({
+    (snapshot: PlaybackSnapshot) => {
+      sendPeerMessage({
+        type: "p2p.playback",
+        memberId,
+        snapshot
+      });
+      return send({
         type: "playback.broadcast",
         roomId: roomCode,
         memberId,
         snapshot
-      }),
-    [memberId, roomCode, send]
+      });
+    },
+    [memberId, roomCode, send, sendPeerMessage]
   );
 
   const broadcastReaction = useCallback(
-    (reaction: ReactionMessage) =>
-      send({
+    (reaction: ReactionMessage) => {
+      const delivered = sendPeerMessage({
+        type: "p2p.reaction",
+        memberId,
+        reaction
+      });
+      if (delivered) {
+        return true;
+      }
+
+      return send({
         type: "reaction.broadcast",
         roomId: roomCode,
         memberId,
         reaction
-      }),
-    [memberId, roomCode, send]
+      });
+    },
+    [memberId, roomCode, send, sendPeerMessage]
   );
 
   const requestControl = useCallback(
-    (request: Omit<ControlRequestMessage, "requestId" | "senderId" | "issuedRoomTimeMs">) =>
-      send({
+    (request: Omit<ControlRequestMessage, "requestId" | "senderId" | "issuedRoomTimeMs">) => {
+      const controlRequest = createControlRequest({
+        requestedAction: request.requestedAction,
+        payload: request.payload,
+        requestId: crypto.randomUUID(),
+        senderId: memberId,
+        issuedRoomTimeMs: Math.round(performance.now() + (clockOffsetMs ?? 0))
+      });
+      const leaderId = roomSnapshot?.leaderId ?? undefined;
+      if (
+        leaderId &&
+        sendPeerMessage(
+          {
+            type: "p2p.control_request",
+            memberId,
+            request: controlRequest
+          },
+          leaderId
+        )
+      ) {
+        return true;
+      }
+
+      return send({
         type: "control.request",
         roomId: roomCode,
         memberId,
-        request: createControlRequest({
-          requestedAction: request.requestedAction,
-          payload: request.payload,
-          requestId: crypto.randomUUID(),
-          senderId: memberId,
-          issuedRoomTimeMs: Math.round(performance.now() + (clockOffsetMs ?? 0))
-        })
-      }),
-    [clockOffsetMs, memberId, roomCode, send]
+        request: controlRequest
+      });
+    },
+    [clockOffsetMs, memberId, roomCode, roomSnapshot?.leaderId, send, sendPeerMessage]
   );
 
   const broadcastMediaPresence = useCallback(
@@ -283,6 +511,29 @@ export function useRoomSync(roomCode: string) {
   );
 
   useEffect(() => {
+    if (connectionState !== "connected" || !roomSnapshot) {
+      return;
+    }
+
+    const peerIds = roomSnapshot.mediaPresence
+      .map((presence) => presence.memberId)
+      .filter((peerId) => peerId !== memberId);
+    const activePeerIds = new Set(peerIds);
+    for (const peerId of peerConnectionsRef.current.keys()) {
+      if (!activePeerIds.has(peerId)) {
+        closePeerConnection(peerId, peerConnectionsRef.current, dataChannelsRef.current);
+      }
+    }
+
+    for (const peerId of peerIds) {
+      if (memberId < peerId) {
+        void startPeerConnection(peerId);
+      }
+    }
+    refreshDataChannelState();
+  }, [connectionState, memberId, refreshDataChannelState, roomSnapshot, startPeerConnection]);
+
+  useEffect(() => {
     return () => {
       shouldReconnectRef.current = false;
       if (reconnectTimerRef.current) {
@@ -292,6 +543,7 @@ export function useRoomSync(roomCode: string) {
         window.clearInterval(pingTimerRef.current);
       }
       socketRef.current?.close();
+      closePeerConnections(peerConnectionsRef.current, dataChannelsRef.current);
     };
   }, []);
 
@@ -304,6 +556,7 @@ export function useRoomSync(roomCode: string) {
     clockOffsetMs,
     connect,
     connectionState,
+    dataChannelState,
     disconnect,
     lastRemotePlayback,
     lastRemoteControlRequest,
@@ -330,6 +583,40 @@ function parseServerMessage(raw: unknown): RealtimeServerMessage | null {
   } catch {
     return null;
   }
+}
+
+function parseDataChannelMessage(raw: unknown): DataChannelSyncMessage | null {
+  if (typeof raw !== "string") {
+    return null;
+  }
+
+  return parseDataChannelSyncMessage(raw);
+}
+
+function closePeerConnections(
+  connections: Map<string, RTCPeerConnection>,
+  channels: Map<string, RTCDataChannel>
+) {
+  for (const channel of channels.values()) {
+    channel.close();
+  }
+  channels.clear();
+
+  for (const connection of connections.values()) {
+    connection.close();
+  }
+  connections.clear();
+}
+
+function closePeerConnection(
+  peerId: string,
+  connections: Map<string, RTCPeerConnection>,
+  channels: Map<string, RTCDataChannel>
+) {
+  channels.get(peerId)?.close();
+  channels.delete(peerId);
+  connections.get(peerId)?.close();
+  connections.delete(peerId);
 }
 
 function getStableId(key: string): string {

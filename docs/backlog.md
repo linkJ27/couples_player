@@ -45,7 +45,7 @@
 - [x] 实现成员 presence。
 - [x] 实现 sessionId。
 - [x] 实现短期断线重连。
-- [ ] 实现 SDP/ICE 转发。
+- [x] 实现 SDP/ICE 转发。
 - [x] 实现房间状态快照。
 
 ## P2：文件匹配
@@ -60,7 +60,7 @@
 
 ## P2：同步播放
 
-- [ ] 建立 WebRTC DataChannel。
+- [x] 建立 WebRTC DataChannel。
 - [x] 实现时间同步 ping/pong。
 - [x] 实现权威播放状态。
 - [x] 实现 play/pause/seek/rate 同步。

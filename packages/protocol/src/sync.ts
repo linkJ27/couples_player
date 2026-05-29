@@ -1,5 +1,6 @@
 import type {
   ControlRequestMessage,
+  DataChannelSyncMessage,
   DriftCorrection,
   FileMatchInput,
   FileMatchResult,
@@ -62,6 +63,31 @@ export function createControlRequest(input: {
     payload: sanitizeControlPayload(input.payload),
     issuedRoomTimeMs: clampNonNegative(input.issuedRoomTimeMs)
   };
+}
+
+export function parseDataChannelSyncMessage(raw: string): DataChannelSyncMessage | null {
+  try {
+    const message = JSON.parse(raw) as Partial<DataChannelSyncMessage>;
+    if (!message || typeof message !== "object" || typeof message.memberId !== "string") {
+      return null;
+    }
+
+    if (message.type === "p2p.playback" && "snapshot" in message) {
+      return message as DataChannelSyncMessage;
+    }
+
+    if (message.type === "p2p.reaction" && "reaction" in message) {
+      return message as DataChannelSyncMessage;
+    }
+
+    if (message.type === "p2p.control_request" && "request" in message) {
+      return message as DataChannelSyncMessage;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export function classifyDrift(driftMs: number): {

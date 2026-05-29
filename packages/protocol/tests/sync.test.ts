@@ -5,6 +5,7 @@ import {
   createControlRequest,
   createPlaybackSnapshot,
   estimateClockOffset,
+  parseDataChannelSyncMessage,
   projectMediaTime,
   quickMediaFingerprint,
   resolveCommandOrder
@@ -132,6 +133,34 @@ describe("control requests", () => {
       },
       issuedRoomTimeMs: 0
     });
+  });
+});
+
+describe("data channel sync messages", () => {
+  it("parses valid p2p playback messages and rejects invalid payloads", () => {
+    const snapshot = createPlaybackSnapshot({
+      state: "paused",
+      mediaId: "media-1",
+      mediaTimeMs: 1_000,
+      roomTimeMs: 2_000,
+      leaderId: "leader"
+    });
+
+    expect(
+      parseDataChannelSyncMessage(
+        JSON.stringify({
+          type: "p2p.playback",
+          memberId: "peer-a",
+          snapshot
+        })
+      )
+    ).toEqual({
+      type: "p2p.playback",
+      memberId: "peer-a",
+      snapshot
+    });
+    expect(parseDataChannelSyncMessage("{")).toBeNull();
+    expect(parseDataChannelSyncMessage(JSON.stringify({ type: "p2p.playback", memberId: "peer-a" }))).toBeNull();
   });
 });
 

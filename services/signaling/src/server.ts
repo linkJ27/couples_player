@@ -170,6 +170,22 @@ function handleMessage(session: ClientSession, message: RealtimeClientMessage) {
     return;
   }
 
+  if (message.type === "webrtc.signal") {
+    const target = findSession(session.roomId, message.targetMemberId);
+    if (!target) {
+      send(session, { type: "room.error", message: "Target peer is not connected" });
+      return;
+    }
+
+    send(target, {
+      type: "webrtc.signal",
+      roomId: session.roomId,
+      memberId: session.memberId,
+      signal: message.signal
+    });
+    return;
+  }
+
   if (message.type === "playback.broadcast") {
     if (!store.canBroadcastPlayback(session.roomId, session.memberId)) {
       send(session, { type: "room.error", message: "Only the leader can control playback in leader mode" });

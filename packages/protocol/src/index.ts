@@ -1,5 +1,6 @@
 export type {
   ControlRequestMessage,
+  DataChannelSyncMessage,
   DriftCorrection,
   FileMatchInput,
   FileMatchResult,
@@ -15,7 +16,8 @@ export type {
   RealtimeServerMessage,
   ReactionMessage,
   RoomSnapshotMessage,
-  RoomMode
+  RoomMode,
+  WebRtcSignalMessage
 } from "./types";
 
 export {
@@ -24,6 +26,7 @@ export {
   createControlRequest,
   createPlaybackSnapshot,
   estimateClockOffset,
+  parseDataChannelSyncMessage,
   projectMediaTime,
   quickMediaFingerprint,
   resolveCommandOrder

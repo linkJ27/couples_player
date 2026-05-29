@@ -97,6 +97,30 @@ export interface RoomSnapshotMessage {
   playlistVersion: number;
 }
 
+export interface WebRtcSignalMessage {
+  signalId: string;
+  type: "offer" | "answer" | "ice";
+  description?: RTCSessionDescriptionInit;
+  candidate?: RTCIceCandidateInit;
+}
+
+export type DataChannelSyncMessage =
+  | {
+      type: "p2p.playback";
+      memberId: string;
+      snapshot: PlaybackSnapshot;
+    }
+  | {
+      type: "p2p.reaction";
+      memberId: string;
+      reaction: ReactionMessage;
+    }
+  | {
+      type: "p2p.control_request";
+      memberId: string;
+      request: ControlRequestMessage;
+    };
+
 export type RealtimeClientMessage =
   | {
       type: "room.join";
@@ -138,6 +162,13 @@ export type RealtimeClientMessage =
       roomId: string;
       memberId: string;
       request: ControlRequestMessage;
+    }
+  | {
+      type: "webrtc.signal";
+      roomId: string;
+      memberId: string;
+      targetMemberId: string;
+      signal: WebRtcSignalMessage;
     }
   | {
       type: "playback.broadcast";
@@ -196,6 +227,12 @@ export type RealtimeServerMessage =
       roomId: string;
       memberId: string;
       request: ControlRequestMessage;
+    }
+  | {
+      type: "webrtc.signal";
+      roomId: string;
+      memberId: string;
+      signal: WebRtcSignalMessage;
     }
   | {
       type: "playback.remote";

@@ -830,6 +830,10 @@ export function App() {
               <dd>{roomSync.connectionState}</dd>
             </div>
             <div>
+              <dt>P2P</dt>
+              <dd>{roomSync.dataChannelState}</dd>
+            </div>
+            <div>
               <dt>主控</dt>
               <dd>{isRoomLeader ? "me" : roomSync.leaderId ? "peer" : "--"}</dd>
             </div>
