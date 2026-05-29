@@ -30,8 +30,11 @@
 - [系统架构](docs/architecture.md)
 - [同步协议](docs/sync-protocol.md)
 - [开发路线](docs/development-plan.md)
+- [开发 Backlog](docs/backlog.md)
+- [Roadmap](docs/roadmap.md)
 - [隐私与安全边界](docs/security-privacy.md)
 - [Git 工作流](docs/git-workflow.md)
+- [技术决策记录](docs/adr/)
 
 ## 仓库结构
 
