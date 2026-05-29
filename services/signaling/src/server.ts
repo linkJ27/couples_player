@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { evaluateReactionRateLimit } from "@couples-player/protocol";
 import type { RealtimeClientMessage, RealtimeServerMessage } from "@couples-player/protocol";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RoomStore, normalizeRoomId } from "./room-store";
@@ -15,6 +16,7 @@ const reconnectWindowMs = Number(process.env.RECONNECT_WINDOW_MS ?? 30_000);
 const store = new RoomStore();
 const sessions = new Set<ClientSession>();
 const pendingLeaves = new Map<string, NodeJS.Timeout>();
+const reactionHistory = new Map<string, number[]>();
 const server = createServer((request, response) => {
   if (request.url === "/health") {
     response.writeHead(200, { "content-type": "application/json" });
@@ -202,6 +204,16 @@ function handleMessage(session: ClientSession, message: RealtimeClientMessage) {
   }
 
   if (message.type === "reaction.broadcast") {
+    const historyKey = createLeaveKey(session.roomId, session.memberId);
+    const rateLimit = evaluateReactionRateLimit({
+      historyMs: reactionHistory.get(historyKey) ?? [],
+      nowMs: Date.now()
+    });
+    reactionHistory.set(historyKey, rateLimit.historyMs);
+    if (!rateLimit.allowed) {
+      return;
+    }
+
     broadcast(session, {
       type: "reaction.remote",
       roomId: session.roomId,
@@ -263,6 +275,7 @@ function leaveSession(session: ClientSession) {
   session.sessionId = null;
 
   const leaveKey = createLeaveKey(roomId, memberId);
+  reactionHistory.delete(leaveKey);
   clearPendingLeave(roomId, memberId);
   pendingLeaves.set(
     leaveKey,

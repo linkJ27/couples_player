@@ -504,6 +504,11 @@ h2 {
   font-size: 1.2rem;
 }
 
+.reaction-grid button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .reaction-layer {
   pointer-events: none;
   position: absolute;

@@ -4,6 +4,7 @@ import {
   calculatePlaybackDrift,
   createControlRequest,
   createPlaybackSnapshot,
+  evaluateReactionRateLimit,
   estimateClockOffset,
   parseDataChannelSyncMessage,
   projectMediaTime,
@@ -161,6 +162,50 @@ describe("data channel sync messages", () => {
     });
     expect(parseDataChannelSyncMessage("{")).toBeNull();
     expect(parseDataChannelSyncMessage(JSON.stringify({ type: "p2p.playback", memberId: "peer-a" }))).toBeNull();
+  });
+});
+
+describe("reaction rate limits", () => {
+  it("allows a short burst and reports retry delay when the window is full", () => {
+    const allowed = evaluateReactionRateLimit({
+      historyMs: [0, 100],
+      nowMs: 200,
+      windowMs: 1_000,
+      maxEvents: 3
+    });
+    expect(allowed).toEqual({
+      allowed: true,
+      historyMs: [0, 100, 200],
+      retryAfterMs: 0
+    });
+
+    expect(
+      evaluateReactionRateLimit({
+        historyMs: allowed.historyMs,
+        nowMs: 250,
+        windowMs: 1_000,
+        maxEvents: 3
+      })
+    ).toEqual({
+      allowed: false,
+      historyMs: [0, 100, 200],
+      retryAfterMs: 750
+    });
+  });
+
+  it("expires old reaction events without blocking newer playback traffic", () => {
+    expect(
+      evaluateReactionRateLimit({
+        historyMs: [0, 100, 200],
+        nowMs: 1_500,
+        windowMs: 1_000,
+        maxEvents: 3
+      })
+    ).toEqual({
+      allowed: true,
+      historyMs: [1_500],
+      retryAfterMs: 0
+    });
   });
 });
 

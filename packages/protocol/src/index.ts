@@ -25,6 +25,7 @@ export {
   classifyDrift,
   createControlRequest,
   createPlaybackSnapshot,
+  evaluateReactionRateLimit,
   estimateClockOffset,
   parseDataChannelSyncMessage,
   projectMediaTime,

@@ -20,7 +20,12 @@ import {
   Volume2
 } from "lucide-react";
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { calculatePlaybackDrift, classifyDrift, createPlaybackSnapshot } from "@couples-player/protocol";
+import {
+  calculatePlaybackDrift,
+  classifyDrift,
+  createPlaybackSnapshot,
+  evaluateReactionRateLimit
+} from "@couples-player/protocol";
 import type { DriftCorrection, PlaybackControlAction } from "@couples-player/protocol";
 import {
   createPlaylistItems,
@@ -50,6 +55,7 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const subtitleInputRef = useRef<HTMLInputElement | null>(null);
   const fingerprintRunRef = useRef(0);
+  const reactionHistoryRef = useRef<number[]>([]);
   const seekLockRef = useRef({ anchorRoomTimeMs: 0, untilRoomTimeMs: 0 });
   const [playlist, setPlaylist] = useState<PlaylistItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -68,6 +74,7 @@ export function App() {
   const [autoNext, setAutoNext] = useState(true);
   const [isStrictHashing, setIsStrictHashing] = useState(false);
   const [lastControlRequestText, setLastControlRequestText] = useState("--");
+  const [reactionCooldownUntilMs, setReactionCooldownUntilMs] = useState(0);
   const [bursts, setBursts] = useState<ReactionBurst[]>([]);
   const roomSync = useRoomSync(roomCode);
 
@@ -85,6 +92,7 @@ export function App() {
   const peerNeedsCurrentMedia =
     roomSync.connectionState === "connected" && activeItem && roomSync.peerCount > 1 && peerMatchCount === 0;
   const roomPlaylist = roomSync.roomSnapshot?.playlist ?? [];
+  const isReactionCoolingDown = reactionCooldownUntilMs > Date.now();
   const snapshot = useMemo(
     () =>
       createPlaybackSnapshot({
@@ -326,6 +334,18 @@ export function App() {
   ]);
 
   const sendReaction = (emoji: string) => {
+    const nowMs = Date.now();
+    const rateLimit = evaluateReactionRateLimit({
+      historyMs: reactionHistoryRef.current,
+      nowMs
+    });
+    reactionHistoryRef.current = rateLimit.historyMs;
+    if (!rateLimit.allowed) {
+      setReactionCooldownUntilMs(nowMs + rateLimit.retryAfterMs);
+      return;
+    }
+
+    setReactionCooldownUntilMs(nowMs + 250);
     const id = `${Date.now()}-${emoji}`;
     setBursts((current) => [...current, { id, emoji }]);
     roomSync.broadcastReaction({
@@ -397,6 +417,18 @@ export function App() {
     document.addEventListener("fullscreenchange", onFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
   }, []);
+
+  useEffect(() => {
+    if (reactionCooldownUntilMs <= Date.now()) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(
+      () => setReactionCooldownUntilMs(0),
+      Math.max(1, reactionCooldownUntilMs - Date.now())
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [reactionCooldownUntilMs]);
 
   useEffect(() => {
     if (roomSync.connectionState === "connected") {
@@ -959,7 +991,12 @@ export function App() {
           </div>
           <div className="reaction-grid">
             {reactions.map((emoji) => (
-              <button key={emoji} onClick={() => sendReaction(emoji)} title={`发送 ${emoji}`}>
+              <button
+                key={emoji}
+                onClick={() => sendReaction(emoji)}
+                title={`发送 ${emoji}`}
+                disabled={isReactionCoolingDown}
+              >
                 {emoji}
               </button>
             ))}

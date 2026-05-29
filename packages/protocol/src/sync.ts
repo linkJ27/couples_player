@@ -90,6 +90,38 @@ export function parseDataChannelSyncMessage(raw: string): DataChannelSyncMessage
   }
 }
 
+export function evaluateReactionRateLimit(input: {
+  historyMs: readonly number[];
+  nowMs: number;
+  windowMs?: number;
+  maxEvents?: number;
+}): {
+  allowed: boolean;
+  historyMs: number[];
+  retryAfterMs: number;
+} {
+  const windowMs = Math.max(1, input.windowMs ?? 3_000);
+  const maxEvents = Math.max(1, input.maxEvents ?? 6);
+  const nowMs = clampNonNegative(input.nowMs);
+  const recentHistory = input.historyMs
+    .filter((timestamp) => Number.isFinite(timestamp) && nowMs - timestamp < windowMs)
+    .sort((left, right) => left - right);
+
+  if (recentHistory.length >= maxEvents) {
+    return {
+      allowed: false,
+      historyMs: recentHistory,
+      retryAfterMs: Math.max(1, windowMs - (nowMs - recentHistory[0]))
+    };
+  }
+
+  return {
+    allowed: true,
+    historyMs: [...recentHistory, nowMs],
+    retryAfterMs: 0
+  };
+}
+
 export function classifyDrift(driftMs: number): {
   correction: DriftCorrection;
   temporaryRate: number;
