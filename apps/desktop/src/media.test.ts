@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  createSegmentedFileFingerprint,
+  createStrictFileFingerprint,
   countPeersWithMedia,
   formatBytes,
   formatTime,
@@ -9,6 +11,7 @@ import {
   toMediaPresence,
   toPlaylistEntries
 } from "./media";
+import type { PlaylistItem } from "./media";
 
 describe("media formatting", () => {
   it("formats playback time", () => {
@@ -25,8 +28,8 @@ describe("media formatting", () => {
 
 describe("playlist navigation", () => {
   const items = [
-    { id: "1", name: "Show.S01E01.mkv", size: 1, lastModified: 1, url: "blob:1", episodeKey: { season: 1, episode: 1 } },
-    { id: "2", name: "Show.S01E02.mkv", size: 1, lastModified: 1, url: "blob:2", episodeKey: { season: 1, episode: 2 } }
+    makePlaylistItem("1", "Show.S01E01.mkv", { season: 1, episode: 1 }),
+    makePlaylistItem("2", "Show.S01E02.mkv", { season: 1, episode: 2 })
   ];
 
   it("moves to the next item and wraps", () => {
@@ -46,15 +49,7 @@ describe("playlist navigation", () => {
 describe("media presence", () => {
   it("maps playlist items into shareable presence without local paths", () => {
     const presence = toMediaPresence([
-      {
-        id: "quick:1",
-        name: "Show.S01E01.mp4",
-        size: 1024,
-        lastModified: 1,
-        url: "blob:local",
-        durationMs: 60_000,
-        episodeKey: { season: 1, episode: 1 }
-      }
+      makePlaylistItem("quick:1", "Show.S01E01.mp4", { season: 1, episode: 1 }, 60_000)
     ]);
 
     expect(presence).toEqual([
@@ -62,7 +57,8 @@ describe("media presence", () => {
         mediaId: "quick:1",
         name: "Show.S01E01.mp4",
         size: 1024,
-        durationMs: 60_000
+        durationMs: 60_000,
+        fingerprintConfidence: "quick"
       }
     ]);
   });
@@ -70,15 +66,7 @@ describe("media presence", () => {
   it("maps playlist items into room playlist entries", () => {
     expect(
       toPlaylistEntries([
-        {
-          id: "quick:1",
-          name: "Show.S01E01.mp4",
-          size: 1024,
-          lastModified: 1,
-          url: "blob:local",
-          durationMs: 60_000,
-          episodeKey: { season: 1, episode: 1 }
-        }
+        makePlaylistItem("quick:1", "Show.S01E01.mp4", { season: 1, episode: 1 }, 60_000)
       ])
     ).toEqual([
       {
@@ -86,7 +74,8 @@ describe("media presence", () => {
         name: "Show.S01E01.mp4",
         size: 1024,
         durationMs: 60_000,
-        episodeKey: { season: 1, episode: 1 }
+        episodeKey: { season: 1, episode: 1 },
+        fingerprintConfidence: "quick"
       }
     ]);
   });
@@ -105,3 +94,44 @@ describe("media presence", () => {
     ).toBe(1);
   });
 });
+
+describe("file fingerprints", () => {
+  it("creates the same segmented fingerprint for identical content with different names", async () => {
+    const left = new File(["same-media-bytes"], "Show.S01E01.mkv");
+    const right = new File(["same-media-bytes"], "Renamed Episode.mkv");
+
+    expect((await createSegmentedFileFingerprint(left, 4)).mediaId).toBe(
+      (await createSegmentedFileFingerprint(right, 4)).mediaId
+    );
+  });
+
+  it("creates a strict SHA-256 fingerprint for the whole file", async () => {
+    const fingerprint = await createStrictFileFingerprint(new File(["abc"], "clip.mkv"));
+
+    expect(fingerprint).toEqual({
+      mediaId: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      label: "clip.mkv",
+      confidence: "strict"
+    });
+  });
+});
+
+function makePlaylistItem(
+  id: string,
+  name: string,
+  episodeKey: PlaylistItem["episodeKey"],
+  durationMs?: number
+): PlaylistItem {
+  return {
+    id,
+    name,
+    size: 1024,
+    lastModified: 1,
+    url: `blob:${id}`,
+    file: new File(["video"], name),
+    fingerprintConfidence: "quick",
+    fingerprintStatus: "ready",
+    durationMs,
+    episodeKey
+  };
+}

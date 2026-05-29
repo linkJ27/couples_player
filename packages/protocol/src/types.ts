@@ -34,7 +34,7 @@ export interface FileMatchInput {
 export interface FileMatchResult {
   mediaId: string;
   label: string;
-  confidence: "quick" | "strict";
+  confidence: "quick" | "segmented" | "strict";
 }
 
 export interface MediaPresenceItem {
@@ -42,6 +42,7 @@ export interface MediaPresenceItem {
   name: string;
   size: number;
   durationMs?: number;
+  fingerprintConfidence?: FileMatchResult["confidence"];
 }
 
 export interface EpisodeKey {
@@ -55,6 +56,7 @@ export interface PlaylistEntry {
   size: number;
   durationMs?: number;
   episodeKey: EpisodeKey | null;
+  fingerprintConfidence?: FileMatchResult["confidence"];
 }
 
 export interface MemberMediaPresence {

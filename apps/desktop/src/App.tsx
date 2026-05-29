@@ -13,6 +13,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  ShieldCheck,
   SkipForward,
   SmilePlus,
   Users,
@@ -23,6 +24,8 @@ import { calculatePlaybackDrift, classifyDrift, createPlaybackSnapshot } from "@
 import type { DriftCorrection } from "@couples-player/protocol";
 import {
   createPlaylistItems,
+  createSegmentedFileFingerprint,
+  createStrictFileFingerprint,
   countPeersWithMedia,
   formatBytes,
   formatTime,
@@ -46,6 +49,7 @@ export function App() {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const subtitleInputRef = useRef<HTMLInputElement | null>(null);
+  const fingerprintRunRef = useRef(0);
   const [playlist, setPlaylist] = useState<PlaylistItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -61,6 +65,7 @@ export function App() {
   const [driftCorrection, setDriftCorrection] = useState<DriftCorrection>("none");
   const [roomCode, setRoomCode] = useState(() => createRoomCode());
   const [autoNext, setAutoNext] = useState(true);
+  const [isStrictHashing, setIsStrictHashing] = useState(false);
   const [bursts, setBursts] = useState<ReactionBurst[]>([]);
   const roomSync = useRoomSync(roomCode);
 
@@ -103,14 +108,50 @@ export function App() {
       return;
     }
 
+    const runId = fingerprintRunRef.current + 1;
+    fingerprintRunRef.current = runId;
+    const nextItems = createPlaylistItems(files);
     setPlaylist((previous) => {
       previous.forEach((item) => URL.revokeObjectURL(item.url));
-      return createPlaylistItems(files);
+      return nextItems;
     });
     setActiveIndex(0);
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
+
+    for (const item of nextItems) {
+      void createSegmentedFileFingerprint(item.file)
+        .then((fingerprint) => {
+          if (fingerprintRunRef.current !== runId) {
+            return;
+          }
+
+          setPlaylist((current) =>
+            current.map((currentItem) =>
+              currentItem.url === item.url
+                ? {
+                    ...currentItem,
+                    id: fingerprint.mediaId,
+                    fingerprintConfidence: fingerprint.confidence,
+                    fingerprintStatus: "ready"
+                  }
+                : currentItem
+            )
+          );
+        })
+        .catch(() => {
+          if (fingerprintRunRef.current !== runId) {
+            return;
+          }
+
+          setPlaylist((current) =>
+            current.map((currentItem) =>
+              currentItem.url === item.url ? { ...currentItem, fingerprintStatus: "error" } : currentItem
+            )
+          );
+        });
+    }
   };
 
   const handleSubtitle = (event: ChangeEvent<HTMLInputElement>) => {
@@ -176,6 +217,40 @@ export function App() {
     setDuration(0);
     setIsPlaying(false);
   };
+
+  const verifyActiveFile = useCallback(async () => {
+    if (!activeItem || isStrictHashing) {
+      return;
+    }
+
+    const itemUrl = activeItem.url;
+    setIsStrictHashing(true);
+    setPlaylist((current) =>
+      current.map((item) => (item.url === itemUrl ? { ...item, fingerprintStatus: "hashing" } : item))
+    );
+
+    try {
+      const fingerprint = await createStrictFileFingerprint(activeItem.file);
+      setPlaylist((current) =>
+        current.map((item) =>
+          item.url === itemUrl
+            ? {
+                ...item,
+                id: fingerprint.mediaId,
+                fingerprintConfidence: fingerprint.confidence,
+                fingerprintStatus: "ready"
+              }
+            : item
+        )
+      );
+    } catch {
+      setPlaylist((current) =>
+        current.map((item) => (item.url === itemUrl ? { ...item, fingerprintStatus: "error" } : item))
+      );
+    } finally {
+      setIsStrictHashing(false);
+    }
+  }, [activeItem, isStrictHashing]);
 
   const goNext = useCallback(() => {
     if (!canControlPlayback) {
@@ -620,7 +695,9 @@ export function App() {
             <div className="file-match">
               <strong>{activeItem.name}</strong>
               <span>{formatBytes(activeItem.size)}</span>
-              <small>{activeItem.id}</small>
+              <small>
+                {formatFingerprintLabel(activeItem)} · {activeItem.id}
+              </small>
               <em className={peerNeedsCurrentMedia ? "match-warning" : "match-ok"}>
                 {roomSync.connectionState !== "connected"
                   ? "本地匹配就绪"
@@ -630,6 +707,14 @@ export function App() {
                       ? "对方缺少当前文件"
                       : "等待对方加入"}
               </em>
+              <button
+                className="secondary-action compact-action"
+                onClick={() => void verifyActiveFile()}
+                disabled={isStrictHashing}
+              >
+                <ShieldCheck size={16} />
+                {isStrictHashing ? "校验中" : "严格校验"}
+              </button>
             </div>
           ) : (
             <p className="muted">还没有选择视频。</p>
@@ -743,4 +828,20 @@ function createRoomCode(): string {
 
 function normalizeRoomCode(value: string): string {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
+}
+
+function formatFingerprintLabel(item: PlaylistItem): string {
+  if (item.fingerprintStatus === "hashing") {
+    return "strict hashing";
+  }
+
+  if (item.fingerprintStatus === "pending") {
+    return "segmenting";
+  }
+
+  if (item.fingerprintStatus === "error") {
+    return `${item.fingerprintConfidence} fingerprint failed`;
+  }
+
+  return `${item.fingerprintConfidence} fingerprint`;
 }

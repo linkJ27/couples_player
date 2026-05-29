@@ -1,5 +1,11 @@
 import { quickMediaFingerprint } from "@couples-player/protocol";
-import type { EpisodeKey, MediaPresenceItem, MemberMediaPresence, PlaylistEntry } from "@couples-player/protocol";
+import type {
+  EpisodeKey,
+  FileMatchResult,
+  MediaPresenceItem,
+  MemberMediaPresence,
+  PlaylistEntry
+} from "@couples-player/protocol";
 
 export interface PlaylistItem {
   id: string;
@@ -7,9 +13,14 @@ export interface PlaylistItem {
   size: number;
   lastModified: number;
   url: string;
+  file: File;
+  fingerprintConfidence: FileMatchResult["confidence"];
+  fingerprintStatus: "pending" | "ready" | "hashing" | "error";
   durationMs?: number;
   episodeKey: EpisodeKey | null;
 }
+
+const defaultSegmentSizeBytes = 256 * 1024;
 
 export function createPlaylistItems(files: File[]): PlaylistItem[] {
   return files.map((file) => {
@@ -25,9 +36,44 @@ export function createPlaylistItems(files: File[]): PlaylistItem[] {
       size: file.size,
       lastModified: file.lastModified,
       url: URL.createObjectURL(file),
+      file,
+      fingerprintConfidence: fingerprint.confidence,
+      fingerprintStatus: "pending",
       episodeKey: inferEpisodeKey(file.name)
     };
   });
+}
+
+export async function createSegmentedFileFingerprint(
+  file: File,
+  segmentSizeBytes = defaultSegmentSizeBytes
+): Promise<FileMatchResult> {
+  const segmentSize = Math.max(1, segmentSizeBytes);
+  const offsets = createSegmentOffsets(file.size, segmentSize);
+  const segments = await Promise.all(
+    offsets.map(async (offset) => {
+      const length = Math.min(segmentSize, file.size - offset);
+      const sha256 = await sha256Hex(await readBlobArrayBuffer(file.slice(offset, offset + length)));
+      return `${offset}:${length}:${sha256}`;
+    })
+  );
+  const digest = await sha256Hex(new TextEncoder().encode(`seg256:v1:${file.size}:${segments.join("|")}`));
+
+  return {
+    mediaId: `seg256:${digest}`,
+    label: file.name,
+    confidence: "segmented"
+  };
+}
+
+export async function createStrictFileFingerprint(file: File): Promise<FileMatchResult> {
+  const digest = await sha256Hex(await readBlobArrayBuffer(file));
+
+  return {
+    mediaId: `sha256:${digest}`,
+    label: file.name,
+    confidence: "strict"
+  };
 }
 
 export function formatTime(totalSeconds: number): string {
@@ -121,7 +167,8 @@ export function toMediaPresence(items: PlaylistItem[]): MediaPresenceItem[] {
     mediaId: item.id,
     name: item.name,
     size: item.size,
-    durationMs: item.durationMs
+    durationMs: item.durationMs,
+    fingerprintConfidence: item.fingerprintConfidence
   }));
 }
 
@@ -131,7 +178,8 @@ export function toPlaylistEntries(items: PlaylistItem[]): PlaylistEntry[] {
     name: item.name,
     size: item.size,
     durationMs: item.durationMs,
-    episodeKey: item.episodeKey
+    episodeKey: item.episodeKey,
+    fingerprintConfidence: item.fingerprintConfidence
   }));
 }
 
@@ -151,4 +199,36 @@ export function countPeersWithMedia(
 
 function pad(value: number): string {
   return value.toString().padStart(2, "0");
+}
+
+function createSegmentOffsets(fileSize: number, segmentSize: number): number[] {
+  if (fileSize <= 0) {
+    return [0];
+  }
+
+  return Array.from(
+    new Set([
+      0,
+      Math.max(0, Math.floor(fileSize / 2 - segmentSize / 2)),
+      Math.max(0, fileSize - segmentSize)
+    ])
+  ).sort((left, right) => left - right);
+}
+
+async function sha256Hex(data: BufferSource): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function readBlobArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
+  if (typeof blob.arrayBuffer === "function") {
+    return blob.arrayBuffer();
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(reader.result as ArrayBuffer));
+    reader.addEventListener("error", () => reject(reader.error ?? new Error("Failed to read file")));
+    reader.readAsArrayBuffer(blob);
+  });
 }

@@ -30,7 +30,7 @@ describe("App", () => {
     await user.upload(input, file);
 
     expect(screen.getAllByText("Show.S01E01.mp4").length).toBeGreaterThan(0);
-    expect(screen.getByText(/quick:/)).toBeInTheDocument();
+    expect(screen.getByText(/(?:quick|seg256):/)).toBeInTheDocument();
   });
 
   it("updates subtitle offset controls", async () => {
@@ -42,4 +42,3 @@ describe("App", () => {
     expect(screen.getByText("100 ms")).toBeInTheDocument();
   });
 });
-

@@ -187,6 +187,11 @@ h2 {
   font-weight: 850;
 }
 
+.secondary-action.compact-action {
+  min-height: 34px;
+  margin-top: 4px;
+}
+
 .control-deck {
   display: grid;
   gap: 12px;
