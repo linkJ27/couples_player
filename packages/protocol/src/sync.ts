@@ -49,6 +49,17 @@ export function calculatePlaybackDrift(input: {
   return projectMediaTime(input.snapshot, input.roomTimeMs) - input.localMediaTimeMs;
 }
 
+export function createPlaybackSnapshotKey(snapshot: PlaybackSnapshot): string {
+  return [
+    snapshot.mediaId ?? "none",
+    snapshot.state,
+    snapshot.anchorMediaTimeMs,
+    snapshot.anchorRoomTimeMs,
+    snapshot.playbackRate,
+    snapshot.leaderId
+  ].join(":");
+}
+
 export function createControlRequest(input: {
   requestId: string;
   senderId: string;

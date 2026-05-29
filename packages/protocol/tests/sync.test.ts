@@ -4,6 +4,7 @@ import {
   calculatePlaybackDrift,
   createControlRequest,
   createPlaybackSnapshot,
+  createPlaybackSnapshotKey,
   evaluateReactionRateLimit,
   estimateClockOffset,
   parseDataChannelSyncMessage,
@@ -36,6 +37,22 @@ describe("playback time projection", () => {
     });
 
     expect(projectMediaTime(snapshot, 30_000)).toBe(10_000);
+  });
+
+  it("creates a stable key for room snapshot recovery dedupe", () => {
+    const snapshot = createPlaybackSnapshot({
+      state: "playing",
+      mediaId: "media-1",
+      mediaTimeMs: 5_000,
+      roomTimeMs: 10_000,
+      playbackRate: 1.25,
+      leaderId: "leader"
+    });
+
+    expect(createPlaybackSnapshotKey(snapshot)).toBe("media-1:playing:5000:10000:1.25:leader");
+    expect(createPlaybackSnapshotKey({ ...snapshot, anchorRoomTimeMs: 11_000 })).not.toBe(
+      createPlaybackSnapshotKey(snapshot)
+    );
   });
 });
 

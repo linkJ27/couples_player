@@ -24,9 +24,10 @@ import {
   calculatePlaybackDrift,
   classifyDrift,
   createPlaybackSnapshot,
+  createPlaybackSnapshotKey,
   evaluateReactionRateLimit
 } from "@couples-player/protocol";
-import type { DriftCorrection, PlaybackControlAction } from "@couples-player/protocol";
+import type { DriftCorrection, PlaybackControlAction, PlaybackSnapshot } from "@couples-player/protocol";
 import {
   createPlaylistItems,
   createSegmentedFileFingerprint,
@@ -57,6 +58,7 @@ export function App() {
   const fingerprintRunRef = useRef(0);
   const reactionHistoryRef = useRef<number[]>([]);
   const seekLockRef = useRef({ anchorRoomTimeMs: 0, untilRoomTimeMs: 0 });
+  const lastAppliedRoomSnapshotRef = useRef("");
   const [playlist, setPlaylist] = useState<PlaylistItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -367,6 +369,59 @@ export function App() {
     [makeSnapshot, roomSync.broadcastPlayback]
   );
 
+  const applyPlaybackSnapshot = useCallback(
+    (playbackSnapshot: PlaybackSnapshot, options: { respectSeekLock: boolean }) => {
+      const video = videoRef.current;
+      if (!video || playbackSnapshot.mediaId !== activeItem?.id) {
+        return false;
+      }
+
+      const roomTimeMs = roomSync.getRoomTimeMs();
+      if (options.respectSeekLock) {
+        const seekLock = seekLockRef.current;
+        if (
+          seekLock.untilRoomTimeMs > roomTimeMs &&
+          playbackSnapshot.anchorRoomTimeMs < seekLock.anchorRoomTimeMs
+        ) {
+          return false;
+        }
+      }
+
+      const drift = calculatePlaybackDrift({
+        snapshot: playbackSnapshot,
+        roomTimeMs,
+        localMediaTimeMs: video.currentTime * 1000
+      });
+      const correction = classifyDrift(drift);
+      setDriftMs(Math.round(drift));
+      setDriftCorrection(correction.correction);
+
+      if (correction.correction === "seek") {
+        const targetTime = Math.max(0, (video.currentTime * 1000 + drift) / 1000);
+        video.currentTime = video.duration ? Math.min(video.duration, targetTime) : targetTime;
+        setCurrentTime(video.currentTime);
+      } else if (correction.correction === "none") {
+        video.playbackRate = playbackSnapshot.playbackRate;
+      } else {
+        video.playbackRate = correction.temporaryRate * playbackSnapshot.playbackRate;
+      }
+
+      setPlaybackRate(playbackSnapshot.playbackRate);
+
+      if (playbackSnapshot.state === "playing" && video.paused) {
+        void video.play();
+      }
+
+      if (playbackSnapshot.state === "paused" && !video.paused) {
+        video.pause();
+      }
+
+      setIsPlaying(playbackSnapshot.state === "playing");
+      return true;
+    },
+    [activeItem?.id, roomSync.getRoomTimeMs]
+  );
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) {
@@ -472,43 +527,47 @@ export function App() {
 
   useEffect(() => {
     const event = roomSync.lastRemotePlayback;
-    const video = videoRef.current;
-    if (!event || !video || event.snapshot.mediaId !== activeItem?.id) {
+    if (!event) {
       return;
     }
 
-    const roomTimeMs = roomSync.getRoomTimeMs();
-    const seekLock = seekLockRef.current;
-    if (seekLock.untilRoomTimeMs > roomTimeMs && event.snapshot.anchorRoomTimeMs < seekLock.anchorRoomTimeMs) {
+    applyPlaybackSnapshot(event.snapshot, { respectSeekLock: true });
+  }, [applyPlaybackSnapshot, roomSync.lastRemotePlayback]);
+
+  useEffect(() => {
+    const playbackSnapshot = roomSync.roomSnapshot?.playbackSnapshot;
+    if (!playbackSnapshot?.mediaId || roomSync.connectionState !== "connected") {
       return;
     }
 
-    const drift = calculatePlaybackDrift({
-      snapshot: event.snapshot,
-      roomTimeMs,
-      localMediaTimeMs: video.currentTime * 1000
-    });
-    const correction = classifyDrift(drift);
-    setDriftMs(Math.round(drift));
-    setDriftCorrection(correction.correction);
-
-    if (correction.correction === "seek") {
-      const targetTime = Math.max(0, (video.currentTime * 1000 + drift) / 1000);
-      video.currentTime = video.duration ? Math.min(video.duration, targetTime) : targetTime;
-    } else if (correction.correction === "none") {
-      video.playbackRate = event.snapshot.playbackRate;
-    } else {
-      video.playbackRate = correction.temporaryRate * event.snapshot.playbackRate;
+    const snapshotKey = createPlaybackSnapshotKey(playbackSnapshot);
+    if (lastAppliedRoomSnapshotRef.current === snapshotKey) {
+      return;
     }
 
-    if (event.snapshot.state === "playing" && video.paused) {
-      void video.play();
+    const matchingIndex = playlist.findIndex((item) => item.id === playbackSnapshot.mediaId);
+    if (matchingIndex < 0) {
+      return;
     }
 
-    if (event.snapshot.state === "paused" && !video.paused) {
-      video.pause();
+    if (matchingIndex !== activeIndex) {
+      setActiveIndex(matchingIndex);
+      setCurrentTime(0);
+      setDuration(0);
+      setIsPlaying(false);
+      return;
     }
-  }, [activeItem?.id, roomSync.getRoomTimeMs, roomSync.lastRemotePlayback]);
+
+    if (applyPlaybackSnapshot(playbackSnapshot, { respectSeekLock: false })) {
+      lastAppliedRoomSnapshotRef.current = snapshotKey;
+    }
+  }, [
+    activeIndex,
+    applyPlaybackSnapshot,
+    playlist,
+    roomSync.connectionState,
+    roomSync.roomSnapshot?.playbackSnapshot
+  ]);
 
   useEffect(() => {
     const event = roomSync.lastRemoteControlRequest;
