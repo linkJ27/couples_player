@@ -27,6 +27,7 @@
 ## 当前实现
 
 当前仓库已落地第一版 React/TypeScript 播放器原型和共享同步协议包。桌面端先以 Vite 应用运行，后续接入 Tauri shell 和 mpv 播放内核。
+信令服务已经支持房间 presence、短断线恢复窗口、主控/自由模式、播放状态广播、表情广播和 ping/pong 延迟测量。
 
 ```powershell
 npm.cmd install

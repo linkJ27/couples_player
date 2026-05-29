@@ -16,7 +16,7 @@ import {
   Volume2
 } from "lucide-react";
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { classifyDrift, createPlaybackSnapshot, type RoomMode } from "@couples-player/protocol";
+import { classifyDrift, createPlaybackSnapshot } from "@couples-player/protocol";
 import {
   createPlaylistItems,
   formatBytes,
@@ -45,13 +45,14 @@ export function App() {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [subtitleOffsetMs, setSubtitleOffsetMs] = useState(0);
   const [roomCode, setRoomCode] = useState(() => createRoomCode());
-  const [roomMode, setRoomMode] = useState<RoomMode>("leader");
-  const [isLeader, setIsLeader] = useState(true);
   const [autoNext, setAutoNext] = useState(true);
   const [bursts, setBursts] = useState<ReactionBurst[]>([]);
   const roomSync = useRoomSync(roomCode);
 
   const activeItem = playlist[activeIndex] ?? null;
+  const isRoomLeader = roomSync.leaderId === roomSync.memberId;
+  const canControlPlayback =
+    roomSync.connectionState !== "connected" || roomSync.roomMode === "free" || isRoomLeader;
   const driftMs = isPlaying ? 126 : 34;
   const correction = classifyDrift(driftMs);
   const snapshot = useMemo(
@@ -62,9 +63,9 @@ export function App() {
         mediaTimeMs: currentTime * 1000,
         roomTimeMs: Math.round(performance.now()),
         playbackRate,
-        leaderId: "local-client"
+        leaderId: roomSync.leaderId ?? roomSync.memberId
       }),
-    [activeItem, currentTime, isPlaying, playbackRate]
+    [activeItem, currentTime, isPlaying, playbackRate, roomSync.leaderId, roomSync.memberId]
   );
 
   const handleFiles = (event: ChangeEvent<HTMLInputElement>) => {
@@ -91,14 +92,14 @@ export function App() {
         mediaTimeMs: mediaTimeSeconds * 1000,
         roomTimeMs: Math.round(performance.now()),
         playbackRate,
-        leaderId: roomSync.memberId
+        leaderId: roomSync.leaderId ?? roomSync.memberId
       }),
-    [activeItem?.id, currentTime, playbackRate, roomSync.memberId]
+    [activeItem?.id, currentTime, playbackRate, roomSync.leaderId, roomSync.memberId]
   );
 
   const togglePlayback = useCallback(async () => {
     const video = videoRef.current;
-    if (!video || !activeItem) {
+    if (!video || !activeItem || !canControlPlayback) {
       return;
     }
 
@@ -107,16 +108,16 @@ export function App() {
     } else {
       video.pause();
     }
-  }, [activeItem]);
+  }, [activeItem, canControlPlayback]);
 
   const jumpBy = useCallback((seconds: number) => {
     const video = videoRef.current;
-    if (!video) {
+    if (!video || !canControlPlayback) {
       return;
     }
 
     video.currentTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + seconds));
-  }, []);
+  }, [canControlPlayback]);
 
   const selectItem = (index: number) => {
     setActiveIndex(index);
@@ -126,11 +127,15 @@ export function App() {
   };
 
   const goNext = useCallback(() => {
+    if (!canControlPlayback) {
+      return;
+    }
+
     const nextIndex = inferNextEpisodeIndex(playlist, activeIndex);
     if (nextIndex >= 0) {
       selectItem(nextIndex);
     }
-  }, [activeIndex, playlist]);
+  }, [activeIndex, canControlPlayback, playlist]);
 
   const sendReaction = (emoji: string) => {
     const id = `${Date.now()}-${emoji}`;
@@ -319,6 +324,7 @@ export function App() {
               max={duration || 0}
               step="0.1"
               value={Math.min(currentTime, duration || 0)}
+              disabled={!canControlPlayback}
               onChange={(event) => {
                 const nextTime = Number(event.target.value);
                 if (videoRef.current) {
@@ -332,16 +338,20 @@ export function App() {
           </div>
 
           <div className="button-row">
-            <button title="快退 10 秒" onClick={() => jumpBy(-10)} disabled={!activeItem}>
+            <button title="快退 10 秒" onClick={() => jumpBy(-10)} disabled={!activeItem || !canControlPlayback}>
               <FastForward className="flip" size={18} />
             </button>
-            <button className="play-button" onClick={() => void togglePlayback()} disabled={!activeItem}>
+            <button
+              className="play-button"
+              onClick={() => void togglePlayback()}
+              disabled={!activeItem || !canControlPlayback}
+            >
               {isPlaying ? <Pause size={22} /> : <Play size={22} />}
             </button>
-            <button title="快进 10 秒" onClick={() => jumpBy(10)} disabled={!activeItem}>
+            <button title="快进 10 秒" onClick={() => jumpBy(10)} disabled={!activeItem || !canControlPlayback}>
               <FastForward size={18} />
             </button>
-            <button title="下一集" onClick={goNext} disabled={playlist.length < 2}>
+            <button title="下一集" onClick={goNext} disabled={playlist.length < 2 || !canControlPlayback}>
               <SkipForward size={18} />
             </button>
             <label className="volume-control" title="本地音量独立控制">
@@ -377,23 +387,27 @@ export function App() {
           </div>
           <div className="mode-grid">
             <button
-              className={roomMode === "leader" ? "selected" : ""}
-              onClick={() => setRoomMode("leader")}
+              className={roomSync.roomMode === "leader" ? "selected" : ""}
+              onClick={() => roomSync.setRoomMode("leader")}
+              disabled={roomSync.connectionState === "connected" && !isRoomLeader}
             >
               主控
             </button>
-            <button className={roomMode === "free" ? "selected" : ""} onClick={() => setRoomMode("free")}>
+            <button
+              className={roomSync.roomMode === "free" ? "selected" : ""}
+              onClick={() => roomSync.setRoomMode("free")}
+              disabled={roomSync.connectionState === "connected" && !isRoomLeader}
+            >
               自由
             </button>
           </div>
-          <label className="switch-line">
-            <input type="checkbox" checked={isLeader} onChange={(event) => setIsLeader(event.target.checked)} />
-            <span>{isLeader ? "我是主控" : "跟随对方"}</span>
-          </label>
+          <button className="leader-action" onClick={roomSync.claimLeader}>
+            {isRoomLeader ? "我是主控" : "申请主控"}
+          </button>
           <dl className="status-list">
             <div>
               <dt>延迟</dt>
-              <dd>48 ms</dd>
+              <dd>{roomSync.latencyMs ?? "--"} ms</dd>
             </div>
             <div>
               <dt>漂移</dt>
@@ -406,6 +420,10 @@ export function App() {
             <div>
               <dt>连接</dt>
               <dd>{roomSync.connectionState}</dd>
+            </div>
+            <div>
+              <dt>主控</dt>
+              <dd>{isRoomLeader ? "me" : roomSync.leaderId ? "peer" : "--"}</dd>
             </div>
           </dl>
         </section>
@@ -501,7 +519,7 @@ export function App() {
           </code>
           <div className="sync-chip">
             <RefreshCw size={14} />
-            <span>{roomMode === "leader" ? "权威时间轴" : "冲突排序"}</span>
+            <span>{roomSync.roomMode === "leader" ? "权威时间轴" : "冲突排序"}</span>
           </div>
         </section>
 

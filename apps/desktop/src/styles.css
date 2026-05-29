@@ -322,6 +322,15 @@ h2 {
   color: #f7fbf8;
 }
 
+.leader-action {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 8px;
+  background: #fff4ee;
+  color: #9b3f2d;
+  font-weight: 850;
+}
+
 .switch-line {
   display: flex;
   align-items: center;

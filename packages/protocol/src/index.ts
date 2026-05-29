@@ -8,6 +8,7 @@ export type {
   RealtimeClientMessage,
   RealtimeServerMessage,
   ReactionMessage,
+  RoomSnapshotMessage,
   RoomMode
 } from "./types";
 

@@ -7,11 +7,14 @@ interface ClientSession {
   socket: WebSocket;
   roomId: string | null;
   memberId: string | null;
+  sessionId: string | null;
 }
 
 const port = Number(process.env.PORT ?? 8787);
+const reconnectWindowMs = Number(process.env.RECONNECT_WINDOW_MS ?? 30_000);
 const store = new RoomStore();
 const sessions = new Set<ClientSession>();
+const pendingLeaves = new Map<string, NodeJS.Timeout>();
 const server = createServer((request, response) => {
   if (request.url === "/health") {
     response.writeHead(200, { "content-type": "application/json" });
@@ -29,7 +32,8 @@ wss.on("connection", (socket) => {
   const session: ClientSession = {
     socket,
     roomId: null,
-    memberId: null
+    memberId: null,
+    sessionId: null
   };
   sessions.add(session);
 
@@ -64,17 +68,33 @@ function handleMessage(session: ClientSession, message: RealtimeClientMessage) {
     leaveSession(session);
     session.roomId = roomId;
     session.memberId = message.memberId;
+    session.sessionId = message.sessionId;
+    clearPendingLeave(roomId, message.memberId);
     const snapshot = store.join(roomId, {
       memberId: message.memberId,
+      sessionId: message.sessionId,
       displayName: message.displayName
     });
     send(session, {
       type: "room.joined",
       roomId,
       memberId: message.memberId,
-      peerCount: snapshot.members.length
+      peerCount: snapshot.members.length,
+      mode: snapshot.mode,
+      leaderId: snapshot.leaderId,
+      playbackSnapshot: snapshot.playbackSnapshot
     });
-    broadcastPeerCount(roomId);
+    broadcastRoomSnapshot(roomId);
+    return;
+  }
+
+  if (message.type === "clock.ping") {
+    send(session, {
+      type: "clock.pong",
+      pingId: message.pingId,
+      clientSentAt: message.clientSentAt,
+      serverTimeMs: Date.now()
+    });
     return;
   }
 
@@ -83,7 +103,30 @@ function handleMessage(session: ClientSession, message: RealtimeClientMessage) {
     return;
   }
 
+  if (message.type === "room.set_mode") {
+    if (store.snapshot(session.roomId).leaderId !== session.memberId) {
+      send(session, { type: "room.error", message: "Only the leader can change mode" });
+      return;
+    }
+
+    store.setMode(session.roomId, message.mode);
+    broadcastRoomSnapshot(session.roomId);
+    return;
+  }
+
+  if (message.type === "room.claim_leader") {
+    store.claimLeader(session.roomId, session.memberId);
+    broadcastRoomSnapshot(session.roomId);
+    return;
+  }
+
   if (message.type === "playback.broadcast") {
+    if (!store.canBroadcastPlayback(session.roomId, session.memberId)) {
+      send(session, { type: "room.error", message: "Only the leader can control playback in leader mode" });
+      return;
+    }
+
+    store.updatePlayback(session.roomId, message.snapshot);
     broadcast(session, {
       type: "playback.remote",
       roomId: session.roomId,
@@ -108,17 +151,29 @@ function leaveSession(session: ClientSession) {
   }
 
   const roomId = session.roomId;
-  store.leave(roomId, session.memberId);
+  const memberId = session.memberId;
   session.roomId = null;
   session.memberId = null;
-  broadcastPeerCount(roomId);
+  session.sessionId = null;
+
+  const leaveKey = createLeaveKey(roomId, memberId);
+  clearPendingLeave(roomId, memberId);
+  pendingLeaves.set(
+    leaveKey,
+    setTimeout(() => {
+      store.leave(roomId, memberId);
+      pendingLeaves.delete(leaveKey);
+      broadcastRoomSnapshot(roomId);
+    }, reconnectWindowMs)
+  );
 }
 
-function broadcastPeerCount(roomId: string) {
-  const peerCount = store.snapshot(roomId).members.length;
+function broadcastRoomSnapshot(roomId: string) {
+  const snapshot = store.toMessage(roomId);
   for (const session of sessions) {
     if (session.roomId === roomId) {
-      send(session, { type: "peer.count", roomId, peerCount });
+      send(session, { type: "peer.count", roomId, peerCount: snapshot.peerCount });
+      send(session, { type: "room.snapshot", snapshot });
     }
   }
 }
@@ -145,3 +200,15 @@ function parseMessage(raw: string): RealtimeClientMessage | null {
   }
 }
 
+function clearPendingLeave(roomId: string, memberId: string) {
+  const leaveKey = createLeaveKey(roomId, memberId);
+  const timeout = pendingLeaves.get(leaveKey);
+  if (timeout) {
+    clearTimeout(timeout);
+    pendingLeaves.delete(leaveKey);
+  }
+}
+
+function createLeaveKey(roomId: string, memberId: string): string {
+  return `${roomId}:${memberId}`;
+}

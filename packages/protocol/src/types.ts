@@ -45,12 +45,37 @@ export interface ReactionMessage {
   createdRoomTimeMs: number;
 }
 
+export interface RoomSnapshotMessage {
+  roomId: string;
+  peerCount: number;
+  mode: RoomMode;
+  leaderId: string | null;
+  playbackSnapshot: PlaybackSnapshot | null;
+}
+
 export type RealtimeClientMessage =
   | {
       type: "room.join";
       roomId: string;
       memberId: string;
+      sessionId: string;
       displayName: string;
+    }
+  | {
+      type: "room.set_mode";
+      roomId: string;
+      memberId: string;
+      mode: RoomMode;
+    }
+  | {
+      type: "room.claim_leader";
+      roomId: string;
+      memberId: string;
+    }
+  | {
+      type: "clock.ping";
+      pingId: string;
+      clientSentAt: number;
     }
   | {
       type: "playback.broadcast";
@@ -71,11 +96,24 @@ export type RealtimeServerMessage =
       roomId: string;
       memberId: string;
       peerCount: number;
+      mode: RoomMode;
+      leaderId: string | null;
+      playbackSnapshot: PlaybackSnapshot | null;
     }
   | {
       type: "peer.count";
       roomId: string;
       peerCount: number;
+    }
+  | {
+      type: "room.snapshot";
+      snapshot: RoomSnapshotMessage;
+    }
+  | {
+      type: "clock.pong";
+      pingId: string;
+      clientSentAt: number;
+      serverTimeMs: number;
     }
   | {
       type: "playback.remote";
