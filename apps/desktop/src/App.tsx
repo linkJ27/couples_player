@@ -4,9 +4,12 @@ import {
   Clock3,
   FastForward,
   FileVideo,
+  Gauge,
   Heart,
   Link2,
   ListVideo,
+  Maximize2,
+  Minimize2,
   Pause,
   Play,
   RefreshCw,
@@ -27,6 +30,7 @@ import {
   toPlaylistEntries,
   type PlaylistItem
 } from "./media";
+import { createSubtitleTrack, isSubtitleFile, type SubtitleTrack } from "./subtitles";
 import { useRoomSync } from "./useRoomSync";
 
 interface ReactionBurst {
@@ -38,7 +42,9 @@ const reactions = ["❤️", "😂", "😮", "🥹", "👏"];
 
 export function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const subtitleInputRef = useRef<HTMLInputElement | null>(null);
   const [playlist, setPlaylist] = useState<PlaylistItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -47,6 +53,9 @@ export function App() {
   const [volume, setVolume] = useState(0.82);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [subtitleOffsetMs, setSubtitleOffsetMs] = useState(0);
+  const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
+  const [subtitleTrack, setSubtitleTrack] = useState<SubtitleTrack | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [roomCode, setRoomCode] = useState(() => createRoomCode());
   const [autoNext, setAutoNext] = useState(true);
   const [bursts, setBursts] = useState<ReactionBurst[]>([]);
@@ -95,6 +104,13 @@ export function App() {
     setDuration(0);
   };
 
+  const handleSubtitle = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    if (file && isSubtitleFile(file)) {
+      setSubtitleFile(file);
+    }
+  };
+
   const makeSnapshot = useCallback(
     (state: "playing" | "paused", mediaTimeSeconds = videoRef.current?.currentTime ?? currentTime) =>
       createPlaybackSnapshot({
@@ -129,6 +145,21 @@ export function App() {
 
     video.currentTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + seconds));
   }, [canControlPlayback]);
+
+  const cyclePlaybackRate = () => {
+    const rates = [0.75, 1, 1.25, 1.5, 2];
+    const currentIndex = rates.indexOf(playbackRate);
+    setPlaybackRate(rates[(currentIndex + 1) % rates.length]);
+  };
+
+  const toggleFullscreen = async () => {
+    if (!document.fullscreenElement) {
+      await stageRef.current?.requestFullscreen();
+      return;
+    }
+
+    await document.exitFullscreen();
+  };
 
   const selectItem = (index: number) => {
     setActiveIndex(index);
@@ -189,6 +220,47 @@ export function App() {
     video.volume = volume;
     video.playbackRate = playbackRate;
   }, [playbackRate, volume]);
+
+  useEffect(() => {
+    let disposed = false;
+
+    async function loadSubtitle() {
+      if (!subtitleFile) {
+        setSubtitleTrack((current) => {
+          if (current) {
+            URL.revokeObjectURL(current.url);
+          }
+          return null;
+        });
+        return;
+      }
+
+      const nextTrack = await createSubtitleTrack(subtitleFile, subtitleOffsetMs);
+      if (disposed) {
+        URL.revokeObjectURL(nextTrack.url);
+        return;
+      }
+
+      setSubtitleTrack((current) => {
+        if (current) {
+          URL.revokeObjectURL(current.url);
+        }
+        return nextTrack;
+      });
+    }
+
+    void loadSubtitle();
+
+    return () => {
+      disposed = true;
+    };
+  }, [subtitleFile, subtitleOffsetMs]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
 
   useEffect(() => {
     if (roomSync.connectionState === "connected") {
@@ -269,6 +341,10 @@ export function App() {
       if (event.key.toLowerCase() === "n") {
         goNext();
       }
+
+      if (event.key.toLowerCase() === "f") {
+        void toggleFullscreen();
+      }
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -278,6 +354,14 @@ export function App() {
   useEffect(() => {
     return () => playlist.forEach((item) => URL.revokeObjectURL(item.url));
   }, [playlist]);
+
+  useEffect(() => {
+    return () => {
+      if (subtitleTrack) {
+        URL.revokeObjectURL(subtitleTrack.url);
+      }
+    };
+  }, [subtitleTrack]);
 
   return (
     <main className="app-shell">
@@ -297,7 +381,7 @@ export function App() {
           </div>
         </header>
 
-        <div className="video-stage">
+        <div className="video-stage" ref={stageRef}>
           {activeItem ? (
             <video
               ref={videoRef}
@@ -328,7 +412,17 @@ export function App() {
                 }
               }}
               controls={false}
-            />
+            >
+              {subtitleTrack && (
+                <track
+                  key={subtitleTrack.url}
+                  kind="subtitles"
+                  src={subtitleTrack.url}
+                  label={subtitleTrack.name}
+                  default
+                />
+              )}
+            </video>
           ) : (
             <div className="empty-stage">
               <Clapperboard size={54} />
@@ -389,6 +483,13 @@ export function App() {
             </button>
             <button title="下一集" onClick={goNext} disabled={playlist.length < 2 || !canControlPlayback}>
               <SkipForward size={18} />
+            </button>
+            <button title="倍速" onClick={cyclePlaybackRate} disabled={!activeItem}>
+              <Gauge size={18} />
+              <span className="rate-label">{playbackRate}x</span>
+            </button>
+            <button title="全屏" onClick={() => void toggleFullscreen()}>
+              {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
             </button>
             <label className="volume-control" title="本地音量独立控制">
               <Volume2 size={18} />
@@ -506,6 +607,17 @@ export function App() {
             <Captions size={18} />
             <h2>字幕</h2>
           </div>
+          <input
+            ref={subtitleInputRef}
+            className="hidden-input"
+            type="file"
+            accept=".srt,.vtt,text/vtt"
+            onChange={handleSubtitle}
+          />
+          <button className="secondary-action" onClick={() => subtitleInputRef.current?.click()}>
+            <Captions size={17} />
+            {subtitleTrack ? subtitleTrack.name : "加载字幕"}
+          </button>
           <div className="stepper">
             <button onClick={() => setSubtitleOffsetMs((value) => value - 100)}>-100</button>
             <span>{subtitleOffsetMs} ms</span>

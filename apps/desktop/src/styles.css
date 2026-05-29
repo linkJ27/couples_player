@@ -225,6 +225,17 @@ h2 {
   color: #17372f;
 }
 
+.button-row button:has(.rate-label) {
+  width: 64px;
+  grid-template-columns: auto auto;
+  column-gap: 4px;
+}
+
+.rate-label {
+  font-size: 0.75rem;
+  font-weight: 850;
+}
+
 .button-row .play-button {
   width: 52px;
   height: 52px;
