@@ -5,19 +5,22 @@
   "type": "module",
   "workspaces": [
     "apps/desktop",
-    "packages/protocol"
+    "packages/protocol",
+    "services/signaling"
   ],
   "scripts": {
     "dev": "npm --workspace apps/desktop run dev",
+    "dev:signaling": "npm --workspace services/signaling run dev",
     "build": "npm --workspaces run build",
     "test": "npm --workspaces run test",
     "typecheck": "npm --workspaces run typecheck"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.7.0",
+    "@types/node": "^22.18.8",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^7.2.6",
     "vitest": "^4.0.16"
   }
 }
-

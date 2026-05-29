@@ -5,6 +5,8 @@ export type {
   PlaybackSnapshot,
   PlaybackState,
   PlaybackSyncCommand,
+  RealtimeClientMessage,
+  RealtimeServerMessage,
   ReactionMessage,
   RoomMode
 } from "./types";
@@ -17,4 +19,3 @@ export {
   quickMediaFingerprint,
   resolveCommandOrder
 } from "./sync";
-

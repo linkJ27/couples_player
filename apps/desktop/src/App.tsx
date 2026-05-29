@@ -24,6 +24,7 @@ import {
   inferNextEpisodeIndex,
   type PlaylistItem
 } from "./media";
+import { useRoomSync } from "./useRoomSync";
 
 interface ReactionBurst {
   id: string;
@@ -43,11 +44,12 @@ export function App() {
   const [volume, setVolume] = useState(0.82);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [subtitleOffsetMs, setSubtitleOffsetMs] = useState(0);
-  const [roomCode] = useState(() => createRoomCode());
+  const [roomCode, setRoomCode] = useState(() => createRoomCode());
   const [roomMode, setRoomMode] = useState<RoomMode>("leader");
   const [isLeader, setIsLeader] = useState(true);
   const [autoNext, setAutoNext] = useState(true);
   const [bursts, setBursts] = useState<ReactionBurst[]>([]);
+  const roomSync = useRoomSync(roomCode);
 
   const activeItem = playlist[activeIndex] ?? null;
   const driftMs = isPlaying ? 126 : 34;
@@ -80,6 +82,19 @@ export function App() {
     setCurrentTime(0);
     setDuration(0);
   };
+
+  const makeSnapshot = useCallback(
+    (state: "playing" | "paused", mediaTimeSeconds = videoRef.current?.currentTime ?? currentTime) =>
+      createPlaybackSnapshot({
+        state,
+        mediaId: activeItem?.id ?? null,
+        mediaTimeMs: mediaTimeSeconds * 1000,
+        roomTimeMs: Math.round(performance.now()),
+        playbackRate,
+        leaderId: roomSync.memberId
+      }),
+    [activeItem?.id, currentTime, playbackRate, roomSync.memberId]
+  );
 
   const togglePlayback = useCallback(async () => {
     const video = videoRef.current;
@@ -120,10 +135,24 @@ export function App() {
   const sendReaction = (emoji: string) => {
     const id = `${Date.now()}-${emoji}`;
     setBursts((current) => [...current, { id, emoji }]);
+    roomSync.broadcastReaction({
+      reactionId: id,
+      senderId: roomSync.memberId,
+      emoji,
+      mediaTimeMs: Math.round(currentTime * 1000),
+      createdRoomTimeMs: Math.round(performance.now())
+    });
     window.setTimeout(() => {
       setBursts((current) => current.filter((burst) => burst.id !== id));
     }, 1800);
   };
+
+  const broadcastCurrentPlayback = useCallback(
+    (state: "playing" | "paused", mediaTimeSeconds?: number) => {
+      roomSync.broadcastPlayback(makeSnapshot(state, mediaTimeSeconds));
+    },
+    [makeSnapshot, roomSync]
+  );
 
   useEffect(() => {
     const video = videoRef.current;
@@ -134,6 +163,40 @@ export function App() {
     video.volume = volume;
     video.playbackRate = playbackRate;
   }, [playbackRate, volume]);
+
+  useEffect(() => {
+    const event = roomSync.lastRemoteReaction;
+    if (!event) {
+      return;
+    }
+
+    const id = `${event.reaction.reactionId}-remote`;
+    setBursts((current) => [...current, { id, emoji: event.reaction.emoji }]);
+    window.setTimeout(() => {
+      setBursts((current) => current.filter((burst) => burst.id !== id));
+    }, 1800);
+  }, [roomSync.lastRemoteReaction]);
+
+  useEffect(() => {
+    const event = roomSync.lastRemotePlayback;
+    const video = videoRef.current;
+    if (!event || !video || event.snapshot.mediaId !== activeItem?.id) {
+      return;
+    }
+
+    const targetSeconds = event.snapshot.anchorMediaTimeMs / 1000;
+    if (Math.abs(video.currentTime - targetSeconds) > 0.25) {
+      video.currentTime = targetSeconds;
+    }
+
+    if (event.snapshot.state === "playing" && video.paused) {
+      void video.play();
+    }
+
+    if (event.snapshot.state === "paused" && !video.paused) {
+      video.pause();
+    }
+  }, [activeItem?.id, roomSync.lastRemotePlayback]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -185,7 +248,11 @@ export function App() {
           </div>
           <div className="room-pill" title="房间码">
             <Link2 size={17} />
-            <span>{roomCode}</span>
+            <input
+              aria-label="房间码"
+              value={roomCode}
+              onChange={(event) => setRoomCode(normalizeRoomCode(event.target.value))}
+            />
           </div>
         </header>
 
@@ -194,8 +261,14 @@ export function App() {
             <video
               ref={videoRef}
               src={activeItem.url}
-              onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
+              onPause={() => {
+                setIsPlaying(false);
+                broadcastCurrentPlayback("paused");
+              }}
+              onPlay={() => {
+                setIsPlaying(true);
+                broadcastCurrentPlayback("playing");
+              }}
               onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
               onLoadedMetadata={(event) => {
                 const nextDuration = event.currentTarget.duration || 0;
@@ -208,6 +281,7 @@ export function App() {
               }}
               onEnded={() => {
                 setIsPlaying(false);
+                broadcastCurrentPlayback("paused");
                 if (autoNext) {
                   goNext();
                 }
@@ -251,6 +325,7 @@ export function App() {
                   videoRef.current.currentTime = nextTime;
                 }
                 setCurrentTime(nextTime);
+                broadcastCurrentPlayback(isPlaying ? "playing" : "paused", nextTime);
               }}
             />
             <span>{formatTime(duration)}</span>
@@ -291,6 +366,15 @@ export function App() {
             <Users size={18} />
             <h2>同步状态</h2>
           </div>
+          <div className="connection-row">
+            <button
+              className={roomSync.connectionState === "connected" ? "selected" : ""}
+              onClick={roomSync.connectionState === "connected" ? roomSync.disconnect : roomSync.connect}
+            >
+              {roomSync.connectionState === "connected" ? "断开房间" : "连接房间"}
+            </button>
+            <span>{roomSync.peerCount} 人在线</span>
+          </div>
           <div className="mode-grid">
             <button
               className={roomMode === "leader" ? "selected" : ""}
@@ -318,6 +402,10 @@ export function App() {
             <div>
               <dt>校准</dt>
               <dd>{correction.correction}</dd>
+            </div>
+            <div>
+              <dt>连接</dt>
+              <dd>{roomSync.connectionState}</dd>
             </div>
           </dl>
         </section>
@@ -433,3 +521,6 @@ function createRoomCode(): string {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
+function normalizeRoomCode(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
+}

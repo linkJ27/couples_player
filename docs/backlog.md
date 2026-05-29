@@ -38,15 +38,15 @@
 ## P1：信令服务
 
 - [ ] 创建 Rust Axum 服务。
-- [ ] 实现健康检查。
-- [ ] 实现 WebSocket 连接。
-- [ ] 实现创建房间。
-- [ ] 实现加入房间。
-- [ ] 实现成员 presence。
+- [x] 实现健康检查。
+- [x] 实现 WebSocket 连接。
+- [x] 实现创建房间。
+- [x] 实现加入房间。
+- [x] 实现成员 presence。
 - [ ] 实现 sessionId。
 - [ ] 实现短期断线重连。
 - [ ] 实现 SDP/ICE 转发。
-- [ ] 实现房间状态快照。
+- [x] 实现房间状态快照。
 
 ## P2：文件匹配
 
@@ -63,7 +63,7 @@
 - [ ] 建立 WebRTC DataChannel。
 - [ ] 实现时间同步 ping/pong。
 - [ ] 实现权威播放状态。
-- [ ] 实现 play/pause/seek/rate 同步。
+- [x] 实现 play/pause/seek/rate 同步。
 - [ ] 实现漂移检测。
 - [ ] 实现小漂移倍速微调。
 - [ ] 实现大漂移 seek 校准。

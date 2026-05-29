@@ -45,3 +45,51 @@ export interface ReactionMessage {
   createdRoomTimeMs: number;
 }
 
+export type RealtimeClientMessage =
+  | {
+      type: "room.join";
+      roomId: string;
+      memberId: string;
+      displayName: string;
+    }
+  | {
+      type: "playback.broadcast";
+      roomId: string;
+      memberId: string;
+      snapshot: PlaybackSnapshot;
+    }
+  | {
+      type: "reaction.broadcast";
+      roomId: string;
+      memberId: string;
+      reaction: ReactionMessage;
+    };
+
+export type RealtimeServerMessage =
+  | {
+      type: "room.joined";
+      roomId: string;
+      memberId: string;
+      peerCount: number;
+    }
+  | {
+      type: "peer.count";
+      roomId: string;
+      peerCount: number;
+    }
+  | {
+      type: "playback.remote";
+      roomId: string;
+      memberId: string;
+      snapshot: PlaybackSnapshot;
+    }
+  | {
+      type: "reaction.remote";
+      roomId: string;
+      memberId: string;
+      reaction: ReactionMessage;
+    }
+  | {
+      type: "room.error";
+      message: string;
+    };

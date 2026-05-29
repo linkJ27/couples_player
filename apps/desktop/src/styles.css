@@ -110,6 +110,16 @@ h2 {
   font-weight: 800;
 }
 
+.room-pill input {
+  width: 98px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
 .video-stage {
   position: relative;
   display: grid;
@@ -273,6 +283,33 @@ h2 {
   margin-bottom: 10px;
 }
 
+.connection-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.connection-row button {
+  min-height: 38px;
+  border-radius: 8px;
+  background: #e7eeea;
+  color: #17372f;
+  font-weight: 850;
+}
+
+.connection-row button.selected {
+  background: #17372f;
+  color: #f7fbf8;
+}
+
+.connection-row span {
+  color: #68736f;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
 .mode-grid button {
   background: #e7eeea;
   color: #43514d;
@@ -301,7 +338,7 @@ h2 {
 
 .status-list {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
   margin: 12px 0 0;
 }
@@ -470,4 +507,3 @@ code {
     grid-template-columns: 48px minmax(0, 1fr) 48px;
   }
 }
-

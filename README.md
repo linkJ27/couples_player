@@ -30,10 +30,17 @@
 
 ```powershell
 npm.cmd install
+npm.cmd run dev:signaling
 npm.cmd run dev
 npm.cmd test
 npm.cmd run build
 ```
+
+本地开发默认地址：
+
+- 播放器：`http://127.0.0.1:5173`
+- 信令服务：`ws://127.0.0.1:8787`
+- 健康检查：`http://127.0.0.1:8787/health`
 
 ## 文档
 
