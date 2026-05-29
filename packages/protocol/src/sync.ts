@@ -1,7 +1,9 @@
 import type {
+  ControlRequestMessage,
   DriftCorrection,
   FileMatchInput,
   FileMatchResult,
+  PlaybackControlAction,
   PlaybackSnapshot,
   PlaybackState,
   PlaybackSyncCommand
@@ -44,6 +46,22 @@ export function calculatePlaybackDrift(input: {
   localMediaTimeMs: number;
 }): number {
   return projectMediaTime(input.snapshot, input.roomTimeMs) - input.localMediaTimeMs;
+}
+
+export function createControlRequest(input: {
+  requestId: string;
+  senderId: string;
+  requestedAction: PlaybackControlAction;
+  payload?: ControlRequestMessage["payload"];
+  issuedRoomTimeMs: number;
+}): ControlRequestMessage {
+  return {
+    requestId: input.requestId,
+    senderId: input.senderId,
+    requestedAction: input.requestedAction,
+    payload: sanitizeControlPayload(input.payload),
+    issuedRoomTimeMs: clampNonNegative(input.issuedRoomTimeMs)
+  };
 }
 
 export function classifyDrift(driftMs: number): {
@@ -103,6 +121,21 @@ export function quickMediaFingerprint(file: FileMatchInput): FileMatchResult {
 
 function clampNonNegative(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function sanitizeControlPayload(payload: ControlRequestMessage["payload"]): ControlRequestMessage["payload"] {
+  if (!payload) {
+    return undefined;
+  }
+
+  return {
+    targetMediaTimeMs:
+      payload.targetMediaTimeMs === undefined ? undefined : clampNonNegative(payload.targetMediaTimeMs),
+    playbackRate:
+      payload.playbackRate === undefined || !Number.isFinite(payload.playbackRate)
+        ? undefined
+        : Math.min(4, Math.max(0.1, payload.playbackRate))
+  };
 }
 
 function hashString(value: string): string {

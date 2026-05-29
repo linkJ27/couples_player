@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { calculatePlaybackDrift, classifyDrift, createPlaybackSnapshot } from "@couples-player/protocol";
-import type { DriftCorrection } from "@couples-player/protocol";
+import type { DriftCorrection, PlaybackControlAction } from "@couples-player/protocol";
 import {
   createPlaylistItems,
   createSegmentedFileFingerprint,
@@ -50,6 +50,7 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const subtitleInputRef = useRef<HTMLInputElement | null>(null);
   const fingerprintRunRef = useRef(0);
+  const seekLockRef = useRef({ anchorRoomTimeMs: 0, untilRoomTimeMs: 0 });
   const [playlist, setPlaylist] = useState<PlaylistItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -66,6 +67,7 @@ export function App() {
   const [roomCode, setRoomCode] = useState(() => createRoomCode());
   const [autoNext, setAutoNext] = useState(true);
   const [isStrictHashing, setIsStrictHashing] = useState(false);
+  const [lastControlRequestText, setLastControlRequestText] = useState("--");
   const [bursts, setBursts] = useState<ReactionBurst[]>([]);
   const roomSync = useRoomSync(roomCode);
 
@@ -73,6 +75,8 @@ export function App() {
   const isRoomLeader = roomSync.leaderId === roomSync.memberId;
   const canControlPlayback =
     roomSync.connectionState !== "connected" || roomSync.roomMode === "free" || isRoomLeader;
+  const canRequestPlayback = roomSync.connectionState === "connected" && roomSync.roomMode === "leader" && !isRoomLeader;
+  const canUsePlaybackControls = canControlPlayback || canRequestPlayback;
   const peerMatchCount = countPeersWithMedia(
     activeItem?.id ?? null,
     roomSync.roomSnapshot?.mediaPresence ?? [],
@@ -174,9 +178,36 @@ export function App() {
     [activeItem?.id, currentTime, playbackRate, roomSync.getRoomTimeMs, roomSync.leaderId, roomSync.memberId]
   );
 
+  const sendControlRequest = useCallback(
+    (requestedAction: PlaybackControlAction, payload?: { targetMediaTimeMs?: number; playbackRate?: number }) => {
+      if (!canRequestPlayback) {
+        return false;
+      }
+
+      return roomSync.requestControl({
+        requestedAction,
+        payload
+      });
+    },
+    [canRequestPlayback, roomSync.requestControl]
+  );
+
+  const engageSeekLock = useCallback(() => {
+    const roomTimeMs = roomSync.getRoomTimeMs();
+    seekLockRef.current = {
+      anchorRoomTimeMs: roomTimeMs,
+      untilRoomTimeMs: roomTimeMs + 1_500
+    };
+  }, [roomSync.getRoomTimeMs]);
+
   const togglePlayback = useCallback(async () => {
     const video = videoRef.current;
-    if (!video || !activeItem || !canControlPlayback) {
+    if (!video || !activeItem) {
+      return;
+    }
+
+    if (!canControlPlayback) {
+      sendControlRequest(video.paused ? "play" : "pause");
       return;
     }
 
@@ -185,21 +216,32 @@ export function App() {
     } else {
       video.pause();
     }
-  }, [activeItem, canControlPlayback]);
+  }, [activeItem, canControlPlayback, sendControlRequest]);
 
   const jumpBy = useCallback((seconds: number) => {
     const video = videoRef.current;
-    if (!video || !canControlPlayback) {
+    if (!video || !activeItem) {
       return;
     }
 
-    video.currentTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + seconds));
-  }, [canControlPlayback]);
+    const nextTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + seconds));
+    if (!canControlPlayback) {
+      sendControlRequest("seek", { targetMediaTimeMs: Math.round(nextTime * 1000) });
+      return;
+    }
+
+    engageSeekLock();
+    video.currentTime = nextTime;
+  }, [activeItem, canControlPlayback, engageSeekLock, sendControlRequest]);
 
   const cyclePlaybackRate = () => {
-    const rates = [0.75, 1, 1.25, 1.5, 2];
-    const currentIndex = rates.indexOf(playbackRate);
-    setPlaybackRate(rates[(currentIndex + 1) % rates.length]);
+    const nextRate = getNextPlaybackRate(playbackRate);
+    if (!canControlPlayback) {
+      sendControlRequest("set_rate", { playbackRate: nextRate });
+      return;
+    }
+
+    setPlaybackRate(nextRate);
   };
 
   const toggleFullscreen = async () => {
@@ -254,6 +296,7 @@ export function App() {
 
   const goNext = useCallback(() => {
     if (!canControlPlayback) {
+      sendControlRequest("next_item");
       return;
     }
 
@@ -271,7 +314,16 @@ export function App() {
     if (nextIndex >= 0) {
       selectItem(nextIndex);
     }
-  }, [activeIndex, canControlPlayback, playlist, roomSync.connectionState, roomSync.memberId, roomSync.peerCount, roomSync.roomSnapshot?.mediaPresence]);
+  }, [
+    activeIndex,
+    canControlPlayback,
+    playlist,
+    roomSync.connectionState,
+    roomSync.memberId,
+    roomSync.peerCount,
+    roomSync.roomSnapshot?.mediaPresence,
+    sendControlRequest
+  ]);
 
   const sendReaction = (emoji: string) => {
     const id = `${Date.now()}-${emoji}`;
@@ -393,9 +445,15 @@ export function App() {
       return;
     }
 
+    const roomTimeMs = roomSync.getRoomTimeMs();
+    const seekLock = seekLockRef.current;
+    if (seekLock.untilRoomTimeMs > roomTimeMs && event.snapshot.anchorRoomTimeMs < seekLock.anchorRoomTimeMs) {
+      return;
+    }
+
     const drift = calculatePlaybackDrift({
       snapshot: event.snapshot,
-      roomTimeMs: roomSync.getRoomTimeMs(),
+      roomTimeMs,
       localMediaTimeMs: video.currentTime * 1000
     });
     const correction = classifyDrift(drift);
@@ -419,6 +477,98 @@ export function App() {
       video.pause();
     }
   }, [activeItem?.id, roomSync.getRoomTimeMs, roomSync.lastRemotePlayback]);
+
+  useEffect(() => {
+    const event = roomSync.lastRemoteControlRequest;
+    if (!event || !isRoomLeader || roomSync.roomMode !== "leader") {
+      return;
+    }
+
+    setLastControlRequestText(`${event.request.requestedAction} from peer`);
+    const video = videoRef.current;
+    const state = video && !video.paused ? "playing" : "paused";
+
+    if (event.request.requestedAction === "play" && video && activeItem) {
+      void video.play();
+      roomSync.broadcastPlayback(makeSnapshot("playing"));
+      return;
+    }
+
+    if (event.request.requestedAction === "pause" && video && activeItem) {
+      video.pause();
+      roomSync.broadcastPlayback(makeSnapshot("paused"));
+      return;
+    }
+
+    if (event.request.requestedAction === "seek" && video && activeItem) {
+      const targetMediaTimeMs = event.request.payload?.targetMediaTimeMs;
+      if (!Number.isFinite(targetMediaTimeMs)) {
+        return;
+      }
+
+      const targetSeconds = Math.max(0, Math.min(video.duration || 0, Number(targetMediaTimeMs) / 1000));
+      engageSeekLock();
+      video.currentTime = targetSeconds;
+      setCurrentTime(targetSeconds);
+      roomSync.broadcastPlayback(makeSnapshot(state, targetSeconds));
+      return;
+    }
+
+    if (event.request.requestedAction === "set_rate" && video && activeItem) {
+      const requestedRate = event.request.payload?.playbackRate;
+      if (!Number.isFinite(requestedRate)) {
+        return;
+      }
+
+      const nextRate = clampPlaybackRate(Number(requestedRate));
+      setPlaybackRate(nextRate);
+      roomSync.broadcastPlayback(
+        createPlaybackSnapshot({
+          state,
+          mediaId: activeItem.id,
+          mediaTimeMs: video.currentTime * 1000,
+          roomTimeMs: Math.round(roomSync.getRoomTimeMs()),
+          playbackRate: nextRate,
+          leaderId: roomSync.leaderId ?? roomSync.memberId
+        })
+      );
+      return;
+    }
+
+    if (event.request.requestedAction === "next_item") {
+      const nextIndex = inferSequentialNextEpisodeIndex(playlist, activeIndex);
+      const nextItem = playlist[nextIndex] ?? null;
+      if (nextIndex < 0 || !nextItem) {
+        return;
+      }
+
+      selectItem(nextIndex);
+      roomSync.broadcastPlayback(
+        createPlaybackSnapshot({
+          state: "paused",
+          mediaId: nextItem.id,
+          mediaTimeMs: 0,
+          roomTimeMs: Math.round(roomSync.getRoomTimeMs()),
+          playbackRate,
+          leaderId: roomSync.leaderId ?? roomSync.memberId
+        })
+      );
+    }
+  }, [
+    activeIndex,
+    activeItem,
+    engageSeekLock,
+    isRoomLeader,
+    makeSnapshot,
+    playbackRate,
+    playlist,
+    roomSync.broadcastPlayback,
+    roomSync.getRoomTimeMs,
+    roomSync.lastRemoteControlRequest,
+    roomSync.leaderId,
+    roomSync.memberId,
+    roomSync.roomMode
+  ]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -497,11 +647,15 @@ export function App() {
               src={activeItem.url}
               onPause={() => {
                 setIsPlaying(false);
-                broadcastCurrentPlayback("paused");
+                if (canControlPlayback) {
+                  broadcastCurrentPlayback("paused");
+                }
               }}
               onPlay={() => {
                 setIsPlaying(true);
-                broadcastCurrentPlayback("playing");
+                if (canControlPlayback) {
+                  broadcastCurrentPlayback("playing");
+                }
               }}
               onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
               onLoadedMetadata={(event) => {
@@ -515,7 +669,9 @@ export function App() {
               }}
               onEnded={() => {
                 setIsPlaying(false);
-                broadcastCurrentPlayback("paused");
+                if (canControlPlayback) {
+                  broadcastCurrentPlayback("paused");
+                }
                 if (autoNext) {
                   goNext();
                 }
@@ -563,10 +719,16 @@ export function App() {
               max={duration || 0}
               step="0.1"
               value={Math.min(currentTime, duration || 0)}
-              disabled={!canControlPlayback}
+              disabled={!canUsePlaybackControls}
               onChange={(event) => {
                 const nextTime = Number(event.target.value);
+                if (!canControlPlayback) {
+                  sendControlRequest("seek", { targetMediaTimeMs: Math.round(nextTime * 1000) });
+                  return;
+                }
+
                 if (videoRef.current) {
+                  engageSeekLock();
                   videoRef.current.currentTime = nextTime;
                 }
                 setCurrentTime(nextTime);
@@ -577,23 +739,23 @@ export function App() {
           </div>
 
           <div className="button-row">
-            <button title="快退 10 秒" onClick={() => jumpBy(-10)} disabled={!activeItem || !canControlPlayback}>
+            <button title="快退 10 秒" onClick={() => jumpBy(-10)} disabled={!activeItem || !canUsePlaybackControls}>
               <FastForward className="flip" size={18} />
             </button>
             <button
               className="play-button"
               onClick={() => void togglePlayback()}
-              disabled={!activeItem || !canControlPlayback}
+              disabled={!activeItem || !canUsePlaybackControls}
             >
               {isPlaying ? <Pause size={22} /> : <Play size={22} />}
             </button>
-            <button title="快进 10 秒" onClick={() => jumpBy(10)} disabled={!activeItem || !canControlPlayback}>
+            <button title="快进 10 秒" onClick={() => jumpBy(10)} disabled={!activeItem || !canUsePlaybackControls}>
               <FastForward size={18} />
             </button>
-            <button title="下一集" onClick={goNext} disabled={playlist.length < 2 || !canControlPlayback}>
+            <button title="下一集" onClick={goNext} disabled={playlist.length < 2 || !canUsePlaybackControls}>
               <SkipForward size={18} />
             </button>
-            <button title="倍速" onClick={cyclePlaybackRate} disabled={!activeItem}>
+            <button title="倍速" onClick={cyclePlaybackRate} disabled={!activeItem || !canUsePlaybackControls}>
               <Gauge size={18} />
               <span className="rate-label">{playbackRate}x</span>
             </button>
@@ -670,6 +832,10 @@ export function App() {
             <div>
               <dt>主控</dt>
               <dd>{isRoomLeader ? "me" : roomSync.leaderId ? "peer" : "--"}</dd>
+            </div>
+            <div>
+              <dt>请求</dt>
+              <dd>{canRequestPlayback ? "request" : lastControlRequestText}</dd>
             </div>
           </dl>
         </section>
@@ -828,6 +994,16 @@ function createRoomCode(): string {
 
 function normalizeRoomCode(value: string): string {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
+}
+
+function getNextPlaybackRate(currentRate: number): number {
+  const rates = [0.75, 1, 1.25, 1.5, 2];
+  const currentIndex = rates.indexOf(currentRate);
+  return rates[(currentIndex + 1) % rates.length];
+}
+
+function clampPlaybackRate(rate: number): number {
+  return Math.min(2, Math.max(0.25, rate));
 }
 
 function formatFingerprintLabel(item: PlaylistItem): string {

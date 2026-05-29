@@ -24,6 +24,19 @@ export interface PlaybackSyncCommand {
   action: "play" | "pause" | "seek" | "set_rate" | "load_media" | "next_item";
 }
 
+export type PlaybackControlAction = PlaybackSyncCommand["action"];
+
+export interface ControlRequestMessage {
+  requestId: string;
+  senderId: string;
+  requestedAction: PlaybackControlAction;
+  payload?: {
+    targetMediaTimeMs?: number;
+    playbackRate?: number;
+  };
+  issuedRoomTimeMs: number;
+}
+
 export interface FileMatchInput {
   name: string;
   size: number;
@@ -121,6 +134,12 @@ export type RealtimeClientMessage =
       playlist: PlaylistEntry[];
     }
   | {
+      type: "control.request";
+      roomId: string;
+      memberId: string;
+      request: ControlRequestMessage;
+    }
+  | {
       type: "playback.broadcast";
       roomId: string;
       memberId: string;
@@ -171,6 +190,12 @@ export type RealtimeServerMessage =
       roomId: string;
       playlist: PlaylistEntry[];
       playlistVersion: number;
+    }
+  | {
+      type: "control.requested";
+      roomId: string;
+      memberId: string;
+      request: ControlRequestMessage;
     }
   | {
       type: "playback.remote";

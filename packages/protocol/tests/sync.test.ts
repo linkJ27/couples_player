@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyDrift,
   calculatePlaybackDrift,
+  createControlRequest,
   createPlaybackSnapshot,
   estimateClockOffset,
   projectMediaTime,
@@ -105,6 +106,32 @@ describe("clock and command ordering", () => {
         senderId: "client-z"
       }).commandId
     ).toBe("d");
+  });
+});
+
+describe("control requests", () => {
+  it("sanitizes requested seek time and playback rate", () => {
+    expect(
+      createControlRequest({
+        requestId: "request-1",
+        senderId: "client-a",
+        requestedAction: "seek",
+        payload: {
+          targetMediaTimeMs: -100,
+          playbackRate: 12
+        },
+        issuedRoomTimeMs: -50
+      })
+    ).toEqual({
+      requestId: "request-1",
+      senderId: "client-a",
+      requestedAction: "seek",
+      payload: {
+        targetMediaTimeMs: 0,
+        playbackRate: 4
+      },
+      issuedRoomTimeMs: 0
+    });
   });
 });
 

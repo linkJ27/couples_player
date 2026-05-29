@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createControlRequest } from "@couples-player/protocol";
 import type {
+  ControlRequestMessage,
   MediaPresenceItem,
   PlaybackSnapshot,
   PlaylistEntry,
@@ -24,6 +26,12 @@ export interface RemoteReactionEvent {
   receivedAt: number;
 }
 
+export interface RemoteControlRequestEvent {
+  memberId: string;
+  request: ControlRequestMessage;
+  receivedAt: number;
+}
+
 const signalingUrl = import.meta.env.VITE_SIGNALING_URL ?? "ws://127.0.0.1:8787";
 const reconnectDelayMs = 1_500;
 const clockPingIntervalMs = 2_500;
@@ -42,6 +50,7 @@ export function useRoomSync(roomCode: string) {
   const [roomSnapshot, setRoomSnapshot] = useState<RoomSnapshotMessage | null>(null);
   const [lastRemotePlayback, setLastRemotePlayback] = useState<RemotePlaybackEvent | null>(null);
   const [lastRemoteReaction, setLastRemoteReaction] = useState<RemoteReactionEvent | null>(null);
+  const [lastRemoteControlRequest, setLastRemoteControlRequest] = useState<RemoteControlRequestEvent | null>(null);
 
   const send = useCallback((message: RealtimeClientMessage) => {
     const socket = socketRef.current;
@@ -139,6 +148,14 @@ export function useRoomSync(roomCode: string) {
         });
       }
 
+      if (message.type === "control.requested") {
+        setLastRemoteControlRequest({
+          memberId: message.memberId,
+          request: message.request,
+          receivedAt: Date.now()
+        });
+      }
+
       if (message.type === "room.error") {
         setConnectionState("error");
       }
@@ -198,6 +215,23 @@ export function useRoomSync(roomCode: string) {
         reaction
       }),
     [memberId, roomCode, send]
+  );
+
+  const requestControl = useCallback(
+    (request: Omit<ControlRequestMessage, "requestId" | "senderId" | "issuedRoomTimeMs">) =>
+      send({
+        type: "control.request",
+        roomId: roomCode,
+        memberId,
+        request: createControlRequest({
+          requestedAction: request.requestedAction,
+          payload: request.payload,
+          requestId: crypto.randomUUID(),
+          senderId: memberId,
+          issuedRoomTimeMs: Math.round(performance.now() + (clockOffsetMs ?? 0))
+        })
+      }),
+    [clockOffsetMs, memberId, roomCode, send]
   );
 
   const broadcastMediaPresence = useCallback(
@@ -272,6 +306,7 @@ export function useRoomSync(roomCode: string) {
     connectionState,
     disconnect,
     lastRemotePlayback,
+    lastRemoteControlRequest,
     lastRemoteReaction,
     latencyMs,
     leaderId: roomSnapshot?.leaderId ?? null,
@@ -280,6 +315,7 @@ export function useRoomSync(roomCode: string) {
     roomMode: roomSnapshot?.mode ?? "leader",
     roomSnapshot,
     getRoomTimeMs,
+    requestControl,
     setRoomMode
   };
 }

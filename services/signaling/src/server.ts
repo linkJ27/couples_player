@@ -143,6 +143,33 @@ function handleMessage(session: ClientSession, message: RealtimeClientMessage) {
     return;
   }
 
+  if (message.type === "control.request") {
+    const snapshot = store.snapshot(session.roomId);
+    if (snapshot.mode !== "leader") {
+      send(session, { type: "room.error", message: "Control requests are only used in leader mode" });
+      return;
+    }
+
+    if (snapshot.leaderId === session.memberId) {
+      send(session, { type: "room.error", message: "Leader should broadcast playback directly" });
+      return;
+    }
+
+    const leader = findSession(session.roomId, snapshot.leaderId);
+    if (!leader) {
+      send(session, { type: "room.error", message: "No leader is connected" });
+      return;
+    }
+
+    send(leader, {
+      type: "control.requested",
+      roomId: session.roomId,
+      memberId: session.memberId,
+      request: message.request
+    });
+    return;
+  }
+
   if (message.type === "playback.broadcast") {
     if (!store.canBroadcastPlayback(session.roomId, session.memberId)) {
       send(session, { type: "room.error", message: "Only the leader can control playback in leader mode" });
@@ -166,6 +193,20 @@ function handleMessage(session: ClientSession, message: RealtimeClientMessage) {
       reaction: message.reaction
     });
   }
+}
+
+function findSession(roomId: string, memberId: string | null): ClientSession | null {
+  if (!memberId) {
+    return null;
+  }
+
+  for (const session of sessions) {
+    if (session.roomId === roomId && session.memberId === memberId) {
+      return session;
+    }
+  }
+
+  return null;
 }
 
 function broadcastMediaPresence(roomId: string) {

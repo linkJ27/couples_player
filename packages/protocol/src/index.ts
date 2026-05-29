@@ -1,4 +1,5 @@
 export type {
+  ControlRequestMessage,
   DriftCorrection,
   FileMatchInput,
   FileMatchResult,
@@ -6,6 +7,7 @@ export type {
   MediaPresenceItem,
   MemberMediaPresence,
   PlaybackSnapshot,
+  PlaybackControlAction,
   PlaylistEntry,
   PlaybackState,
   PlaybackSyncCommand,
@@ -19,6 +21,7 @@ export type {
 export {
   calculatePlaybackDrift,
   classifyDrift,
+  createControlRequest,
   createPlaybackSnapshot,
   estimateClockOffset,
   projectMediaTime,
