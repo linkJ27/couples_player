@@ -444,6 +444,28 @@ h2 {
   padding-right: 2px;
 }
 
+.room-playlist {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  border-radius: 8px;
+  background: #f3f6f3;
+  padding: 9px;
+}
+
+.room-playlist strong {
+  color: #17372f;
+  font-size: 0.82rem;
+}
+
+.room-playlist span {
+  overflow: hidden;
+  color: #68736f;
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .playlist-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

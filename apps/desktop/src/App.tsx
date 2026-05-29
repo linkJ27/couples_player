@@ -22,8 +22,9 @@ import {
   countPeersWithMedia,
   formatBytes,
   formatTime,
-  inferNextEpisodeIndex,
+  inferSequentialNextEpisodeIndex,
   toMediaPresence,
+  toPlaylistEntries,
   type PlaylistItem
 } from "./media";
 import { useRoomSync } from "./useRoomSync";
@@ -62,6 +63,7 @@ export function App() {
   );
   const peerNeedsCurrentMedia =
     roomSync.connectionState === "connected" && activeItem && roomSync.peerCount > 1 && peerMatchCount === 0;
+  const roomPlaylist = roomSync.roomSnapshot?.playlist ?? [];
   const driftMs = isPlaying ? 126 : 34;
   const correction = classifyDrift(driftMs);
   const snapshot = useMemo(
@@ -140,11 +142,21 @@ export function App() {
       return;
     }
 
-    const nextIndex = inferNextEpisodeIndex(playlist, activeIndex);
+    const nextIndex = inferSequentialNextEpisodeIndex(playlist, activeIndex);
+    const nextItem = playlist[nextIndex] ?? null;
+    const peerHasNext =
+      roomSync.connectionState !== "connected" ||
+      roomSync.peerCount <= 1 ||
+      countPeersWithMedia(nextItem?.id ?? null, roomSync.roomSnapshot?.mediaPresence ?? [], roomSync.memberId) > 0;
+
+    if (!peerHasNext) {
+      return;
+    }
+
     if (nextIndex >= 0) {
       selectItem(nextIndex);
     }
-  }, [activeIndex, canControlPlayback, playlist]);
+  }, [activeIndex, canControlPlayback, playlist, roomSync.connectionState, roomSync.memberId, roomSync.peerCount, roomSync.roomSnapshot?.mediaPresence]);
 
   const sendReaction = (emoji: string) => {
     const id = `${Date.now()}-${emoji}`;
@@ -181,8 +193,17 @@ export function App() {
   useEffect(() => {
     if (roomSync.connectionState === "connected") {
       roomSync.broadcastMediaPresence(toMediaPresence(playlist));
+      if (canControlPlayback) {
+        roomSync.broadcastPlaylist(toPlaylistEntries(playlist));
+      }
     }
-  }, [playlist, roomSync.broadcastMediaPresence, roomSync.connectionState]);
+  }, [
+    canControlPlayback,
+    playlist,
+    roomSync.broadcastMediaPresence,
+    roomSync.broadcastPlaylist,
+    roomSync.connectionState
+  ]);
 
   useEffect(() => {
     const event = roomSync.lastRemoteReaction;
@@ -517,6 +538,17 @@ export function App() {
               ))
             )}
           </div>
+          {roomPlaylist.length > 0 && (
+            <div className="room-playlist">
+              <strong>房间队列</strong>
+              {roomPlaylist.slice(0, 4).map((item) => (
+                <span key={item.mediaId}>
+                  {item.episodeKey ? `E${item.episodeKey.episode} · ` : ""}
+                  {item.name}
+                </span>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="panel-block">

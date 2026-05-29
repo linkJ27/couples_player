@@ -44,6 +44,19 @@ export interface MediaPresenceItem {
   durationMs?: number;
 }
 
+export interface EpisodeKey {
+  season: number | null;
+  episode: number;
+}
+
+export interface PlaylistEntry {
+  mediaId: string;
+  name: string;
+  size: number;
+  durationMs?: number;
+  episodeKey: EpisodeKey | null;
+}
+
 export interface MemberMediaPresence {
   memberId: string;
   displayName: string;
@@ -65,6 +78,8 @@ export interface RoomSnapshotMessage {
   leaderId: string | null;
   playbackSnapshot: PlaybackSnapshot | null;
   mediaPresence: MemberMediaPresence[];
+  playlist: PlaylistEntry[];
+  playlistVersion: number;
 }
 
 export type RealtimeClientMessage =
@@ -98,6 +113,12 @@ export type RealtimeClientMessage =
       media: MediaPresenceItem[];
     }
   | {
+      type: "playlist.update";
+      roomId: string;
+      memberId: string;
+      playlist: PlaylistEntry[];
+    }
+  | {
       type: "playback.broadcast";
       roomId: string;
       memberId: string;
@@ -120,6 +141,8 @@ export type RealtimeServerMessage =
       leaderId: string | null;
       playbackSnapshot: PlaybackSnapshot | null;
       mediaPresence: MemberMediaPresence[];
+      playlist: PlaylistEntry[];
+      playlistVersion: number;
     }
   | {
       type: "peer.count";
@@ -140,6 +163,12 @@ export type RealtimeServerMessage =
       type: "media.presence";
       roomId: string;
       mediaPresence: MemberMediaPresence[];
+    }
+  | {
+      type: "playlist.update";
+      roomId: string;
+      playlist: PlaylistEntry[];
+      playlistVersion: number;
     }
   | {
       type: "playback.remote";

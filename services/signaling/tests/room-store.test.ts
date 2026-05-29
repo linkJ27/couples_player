@@ -69,11 +69,27 @@ describe("RoomStore", () => {
     expect(store.hasPeerMedia("love1", "a", "quick:e1")).toBe(true);
     expect(store.hasPeerMedia("love1", "a", "quick:e2")).toBe(true);
     expect(store.hasPeerMedia("love1", "b", "quick:e2")).toBe(false);
+    store.updatePlaylist("love1", [
+      {
+        mediaId: "quick:e1",
+        name: "Show.S01E01.mp4",
+        size: 1024,
+        episodeKey: { season: 1, episode: 1 }
+      },
+      {
+        mediaId: "quick:e1",
+        name: "Duplicate.mp4",
+        size: 1024,
+        episodeKey: { season: 1, episode: 1 }
+      }
+    ]);
     expect(store.toMessage("love1")).toMatchObject({
       roomId: "LOVE1",
       peerCount: 2,
       mode: "free",
       leaderId: "b",
+      playlistVersion: 1,
+      playlist: [{ mediaId: "quick:e1", name: "Show.S01E01.mp4" }],
       playbackSnapshot,
       mediaPresence: [
         {

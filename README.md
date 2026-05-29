@@ -27,7 +27,7 @@
 ## 当前实现
 
 当前仓库已落地第一版 Tauri 桌面壳配置、React/TypeScript WebView UI 原型和共享同步协议包。现阶段用 Vite 单独运行 UI 方便开发验证；最终交付目标仍是 Tauri 桌面端，后续接入 mpv/libmpv 播放内核。
-信令服务已经支持房间 presence、短断线恢复窗口、主控/自由模式、播放状态广播、表情广播、媒体 presence 聚合和 ping/pong 延迟测量。
+信令服务已经支持房间 presence、短断线恢复窗口、主控/自由模式、播放状态广播、房间播放列表同步、表情广播、媒体 presence 聚合和 ping/pong 延迟测量。
 
 当前机器缺少 Rust 工具链时，`tauri:dev` 会失败在 `cargo metadata`，这是环境限制，不代表 Tauri 配置文件缺失。
 

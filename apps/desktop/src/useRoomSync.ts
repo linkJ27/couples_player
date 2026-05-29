@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   MediaPresenceItem,
   PlaybackSnapshot,
+  PlaylistEntry,
   RealtimeClientMessage,
   RealtimeServerMessage,
   ReactionMessage,
@@ -92,13 +93,27 @@ export function useRoomSync(roomCode: string) {
           mode: message.mode,
           leaderId: message.leaderId,
           playbackSnapshot: message.playbackSnapshot,
-          mediaPresence: message.mediaPresence
+          mediaPresence: message.mediaPresence,
+          playlist: message.playlist,
+          playlistVersion: message.playlistVersion
         });
       }
 
       if (message.type === "room.snapshot") {
         setRoomSnapshot(message.snapshot);
         setPeerCount(message.snapshot.peerCount);
+      }
+
+      if (message.type === "playlist.update") {
+        setRoomSnapshot((current) =>
+          current
+            ? {
+                ...current,
+                playlist: message.playlist,
+                playlistVersion: message.playlistVersion
+              }
+            : current
+        );
       }
 
       if (message.type === "clock.pong") {
@@ -196,6 +211,17 @@ export function useRoomSync(roomCode: string) {
     [memberId, roomCode, send]
   );
 
+  const broadcastPlaylist = useCallback(
+    (playlist: PlaylistEntry[]) =>
+      send({
+        type: "playlist.update",
+        roomId: roomCode,
+        memberId,
+        playlist
+      }),
+    [memberId, roomCode, send]
+  );
+
   const setRoomMode = useCallback(
     (mode: RoomMode) =>
       send({
@@ -232,6 +258,7 @@ export function useRoomSync(roomCode: string) {
 
   return {
     broadcastPlayback,
+    broadcastPlaylist,
     broadcastMediaPresence,
     broadcastReaction,
     claimLeader,

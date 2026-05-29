@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { countPeersWithMedia, formatBytes, formatTime, inferNextEpisodeIndex, toMediaPresence } from "./media";
+import {
+  countPeersWithMedia,
+  formatBytes,
+  formatTime,
+  inferEpisodeKey,
+  inferNextEpisodeIndex,
+  inferSequentialNextEpisodeIndex,
+  toMediaPresence,
+  toPlaylistEntries
+} from "./media";
 
 describe("media formatting", () => {
   it("formats playback time", () => {
@@ -16,14 +25,21 @@ describe("media formatting", () => {
 
 describe("playlist navigation", () => {
   const items = [
-    { id: "1", name: "e1.mkv", size: 1, lastModified: 1, url: "blob:1" },
-    { id: "2", name: "e2.mkv", size: 1, lastModified: 1, url: "blob:2" }
+    { id: "1", name: "Show.S01E01.mkv", size: 1, lastModified: 1, url: "blob:1", episodeKey: { season: 1, episode: 1 } },
+    { id: "2", name: "Show.S01E02.mkv", size: 1, lastModified: 1, url: "blob:2", episodeKey: { season: 1, episode: 2 } }
   ];
 
   it("moves to the next item and wraps", () => {
     expect(inferNextEpisodeIndex(items, 0)).toBe(1);
     expect(inferNextEpisodeIndex(items, 1)).toBe(0);
     expect(inferNextEpisodeIndex([], 0)).toBe(-1);
+  });
+
+  it("detects episode keys and prefers the next numbered episode", () => {
+    expect(inferEpisodeKey("Show.S02E003.mkv")).toEqual({ season: 2, episode: 3 });
+    expect(inferEpisodeKey("剧集 第12集.mp4")).toEqual({ season: null, episode: 12 });
+    expect(inferEpisodeKey("Show.07.mkv")).toEqual({ season: null, episode: 7 });
+    expect(inferSequentialNextEpisodeIndex(items, 0)).toBe(1);
   });
 });
 
@@ -36,7 +52,8 @@ describe("media presence", () => {
         size: 1024,
         lastModified: 1,
         url: "blob:local",
-        durationMs: 60_000
+        durationMs: 60_000,
+        episodeKey: { season: 1, episode: 1 }
       }
     ]);
 
@@ -46,6 +63,30 @@ describe("media presence", () => {
         name: "Show.S01E01.mp4",
         size: 1024,
         durationMs: 60_000
+      }
+    ]);
+  });
+
+  it("maps playlist items into room playlist entries", () => {
+    expect(
+      toPlaylistEntries([
+        {
+          id: "quick:1",
+          name: "Show.S01E01.mp4",
+          size: 1024,
+          lastModified: 1,
+          url: "blob:local",
+          durationMs: 60_000,
+          episodeKey: { season: 1, episode: 1 }
+        }
+      ])
+    ).toEqual([
+      {
+        mediaId: "quick:1",
+        name: "Show.S01E01.mp4",
+        size: 1024,
+        durationMs: 60_000,
+        episodeKey: { season: 1, episode: 1 }
       }
     ]);
   });

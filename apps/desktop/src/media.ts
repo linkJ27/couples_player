@@ -1,5 +1,5 @@
 import { quickMediaFingerprint } from "@couples-player/protocol";
-import type { MediaPresenceItem, MemberMediaPresence } from "@couples-player/protocol";
+import type { EpisodeKey, MediaPresenceItem, MemberMediaPresence, PlaylistEntry } from "@couples-player/protocol";
 
 export interface PlaylistItem {
   id: string;
@@ -8,6 +8,7 @@ export interface PlaylistItem {
   lastModified: number;
   url: string;
   durationMs?: number;
+  episodeKey: EpisodeKey | null;
 }
 
 export function createPlaylistItems(files: File[]): PlaylistItem[] {
@@ -23,7 +24,8 @@ export function createPlaylistItems(files: File[]): PlaylistItem[] {
       name: file.name,
       size: file.size,
       lastModified: file.lastModified,
-      url: URL.createObjectURL(file)
+      url: URL.createObjectURL(file),
+      episodeKey: inferEpisodeKey(file.name)
     };
   });
 }
@@ -69,12 +71,67 @@ export function inferNextEpisodeIndex(items: PlaylistItem[], currentIndex: numbe
   return currentIndex >= items.length - 1 ? 0 : currentIndex + 1;
 }
 
+export function inferEpisodeKey(name: string): EpisodeKey | null {
+  const sxxexx = /s(\d{1,2})e(\d{1,4})/i.exec(name);
+  if (sxxexx) {
+    return {
+      season: Number(sxxexx[1]),
+      episode: Number(sxxexx[2])
+    };
+  }
+
+  const chineseEpisode = /第\s*(\d{1,4})\s*[集话話]/u.exec(name);
+  if (chineseEpisode) {
+    return {
+      season: null,
+      episode: Number(chineseEpisode[1])
+    };
+  }
+
+  const trailingNumber = /(?:^|[^\d])(\d{1,4})(?=\.[^.]+$)/u.exec(name);
+  if (trailingNumber) {
+    return {
+      season: null,
+      episode: Number(trailingNumber[1])
+    };
+  }
+
+  return null;
+}
+
+export function inferSequentialNextEpisodeIndex(items: PlaylistItem[], currentIndex: number): number {
+  const current = items[currentIndex];
+  if (!current?.episodeKey) {
+    return inferNextEpisodeIndex(items, currentIndex);
+  }
+
+  const targetSeason = current.episodeKey.season;
+  const targetEpisode = current.episodeKey.episode + 1;
+  const nextIndex = items.findIndex(
+    (item) =>
+      item.episodeKey?.episode === targetEpisode &&
+      (targetSeason === null || item.episodeKey.season === targetSeason)
+  );
+
+  return nextIndex >= 0 ? nextIndex : inferNextEpisodeIndex(items, currentIndex);
+}
+
 export function toMediaPresence(items: PlaylistItem[]): MediaPresenceItem[] {
   return items.map((item) => ({
     mediaId: item.id,
     name: item.name,
     size: item.size,
     durationMs: item.durationMs
+  }));
+}
+
+export function toPlaylistEntries(items: PlaylistItem[]): PlaylistEntry[] {
+  return items.map((item) => ({
+    mediaId: item.id,
+    name: item.name,
+    size: item.size,
+    durationMs: item.durationMs,
+    episodeKey: item.episodeKey
   }));
 }
 
