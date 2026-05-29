@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyDrift,
+  calculatePlaybackDrift,
   createPlaybackSnapshot,
   estimateClockOffset,
   projectMediaTime,
@@ -36,6 +37,24 @@ describe("playback time projection", () => {
 });
 
 describe("drift classification", () => {
+  it("calculates drift against projected room time", () => {
+    const snapshot = createPlaybackSnapshot({
+      state: "playing",
+      mediaId: "media-1",
+      mediaTimeMs: 1_000,
+      roomTimeMs: 10_000,
+      leaderId: "a"
+    });
+
+    expect(
+      calculatePlaybackDrift({
+        snapshot,
+        roomTimeMs: 11_000,
+        localMediaTimeMs: 1_250
+      })
+    ).toBe(750);
+  });
+
   it("ignores small drift", () => {
     expect(classifyDrift(60)).toEqual({ correction: "none", temporaryRate: 1 });
   });
@@ -101,4 +120,3 @@ describe("quick media fingerprint", () => {
     expect(quickMediaFingerprint(input)).toEqual(quickMediaFingerprint(input));
   });
 });
-

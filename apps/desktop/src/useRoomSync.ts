@@ -243,6 +243,11 @@ export function useRoomSync(roomCode: string) {
     [memberId, roomCode, send]
   );
 
+  const getRoomTimeMs = useCallback(
+    () => performance.now() + (clockOffsetMs ?? 0),
+    [clockOffsetMs]
+  );
+
   useEffect(() => {
     return () => {
       shouldReconnectRef.current = false;
@@ -274,6 +279,7 @@ export function useRoomSync(roomCode: string) {
     peerCount,
     roomMode: roomSnapshot?.mode ?? "leader",
     roomSnapshot,
+    getRoomTimeMs,
     setRoomMode
   };
 }

@@ -19,7 +19,8 @@ import {
   Volume2
 } from "lucide-react";
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { classifyDrift, createPlaybackSnapshot } from "@couples-player/protocol";
+import { calculatePlaybackDrift, classifyDrift, createPlaybackSnapshot } from "@couples-player/protocol";
+import type { DriftCorrection } from "@couples-player/protocol";
 import {
   createPlaylistItems,
   countPeersWithMedia,
@@ -56,6 +57,8 @@ export function App() {
   const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
   const [subtitleTrack, setSubtitleTrack] = useState<SubtitleTrack | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [driftMs, setDriftMs] = useState(0);
+  const [driftCorrection, setDriftCorrection] = useState<DriftCorrection>("none");
   const [roomCode, setRoomCode] = useState(() => createRoomCode());
   const [autoNext, setAutoNext] = useState(true);
   const [bursts, setBursts] = useState<ReactionBurst[]>([]);
@@ -73,19 +76,25 @@ export function App() {
   const peerNeedsCurrentMedia =
     roomSync.connectionState === "connected" && activeItem && roomSync.peerCount > 1 && peerMatchCount === 0;
   const roomPlaylist = roomSync.roomSnapshot?.playlist ?? [];
-  const driftMs = isPlaying ? 126 : 34;
-  const correction = classifyDrift(driftMs);
   const snapshot = useMemo(
     () =>
       createPlaybackSnapshot({
         state: isPlaying ? "playing" : activeItem ? "paused" : "idle",
         mediaId: activeItem?.id ?? null,
         mediaTimeMs: currentTime * 1000,
-        roomTimeMs: Math.round(performance.now()),
+        roomTimeMs: Math.round(roomSync.getRoomTimeMs()),
         playbackRate,
         leaderId: roomSync.leaderId ?? roomSync.memberId
       }),
-    [activeItem, currentTime, isPlaying, playbackRate, roomSync.leaderId, roomSync.memberId]
+    [
+      activeItem,
+      currentTime,
+      isPlaying,
+      playbackRate,
+      roomSync.getRoomTimeMs,
+      roomSync.leaderId,
+      roomSync.memberId
+    ]
   );
 
   const handleFiles = (event: ChangeEvent<HTMLInputElement>) => {
@@ -117,11 +126,11 @@ export function App() {
         state,
         mediaId: activeItem?.id ?? null,
         mediaTimeMs: mediaTimeSeconds * 1000,
-        roomTimeMs: Math.round(performance.now()),
+        roomTimeMs: Math.round(roomSync.getRoomTimeMs()),
         playbackRate,
         leaderId: roomSync.leaderId ?? roomSync.memberId
       }),
-    [activeItem?.id, currentTime, playbackRate, roomSync.leaderId, roomSync.memberId]
+    [activeItem?.id, currentTime, playbackRate, roomSync.getRoomTimeMs, roomSync.leaderId, roomSync.memberId]
   );
 
   const togglePlayback = useCallback(async () => {
@@ -197,7 +206,7 @@ export function App() {
       senderId: roomSync.memberId,
       emoji,
       mediaTimeMs: Math.round(currentTime * 1000),
-      createdRoomTimeMs: Math.round(performance.now())
+      createdRoomTimeMs: Math.round(roomSync.getRoomTimeMs())
     });
     window.setTimeout(() => {
       setBursts((current) => current.filter((burst) => burst.id !== id));
@@ -208,7 +217,7 @@ export function App() {
     (state: "playing" | "paused", mediaTimeSeconds?: number) => {
       roomSync.broadcastPlayback(makeSnapshot(state, mediaTimeSeconds));
     },
-    [makeSnapshot, roomSync]
+    [makeSnapshot, roomSync.broadcastPlayback]
   );
 
   useEffect(() => {
@@ -278,6 +287,18 @@ export function App() {
   ]);
 
   useEffect(() => {
+    if (!isPlaying || !activeItem || !canControlPlayback || roomSync.connectionState !== "connected") {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      broadcastCurrentPlayback("playing");
+    }, 2_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [activeItem, broadcastCurrentPlayback, canControlPlayback, isPlaying, roomSync.connectionState]);
+
+  useEffect(() => {
     const event = roomSync.lastRemoteReaction;
     if (!event) {
       return;
@@ -297,9 +318,22 @@ export function App() {
       return;
     }
 
-    const targetSeconds = event.snapshot.anchorMediaTimeMs / 1000;
-    if (Math.abs(video.currentTime - targetSeconds) > 0.25) {
-      video.currentTime = targetSeconds;
+    const drift = calculatePlaybackDrift({
+      snapshot: event.snapshot,
+      roomTimeMs: roomSync.getRoomTimeMs(),
+      localMediaTimeMs: video.currentTime * 1000
+    });
+    const correction = classifyDrift(drift);
+    setDriftMs(Math.round(drift));
+    setDriftCorrection(correction.correction);
+
+    if (correction.correction === "seek") {
+      const targetTime = Math.max(0, (video.currentTime * 1000 + drift) / 1000);
+      video.currentTime = video.duration ? Math.min(video.duration, targetTime) : targetTime;
+    } else if (correction.correction === "none") {
+      video.playbackRate = event.snapshot.playbackRate;
+    } else {
+      video.playbackRate = correction.temporaryRate * event.snapshot.playbackRate;
     }
 
     if (event.snapshot.state === "playing" && video.paused) {
@@ -309,7 +343,7 @@ export function App() {
     if (event.snapshot.state === "paused" && !video.paused) {
       video.pause();
     }
-  }, [activeItem?.id, roomSync.lastRemotePlayback]);
+  }, [activeItem?.id, roomSync.getRoomTimeMs, roomSync.lastRemotePlayback]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -552,7 +586,7 @@ export function App() {
             </div>
             <div>
               <dt>校准</dt>
-              <dd>{correction.correction}</dd>
+              <dd>{driftCorrection}</dd>
             </div>
             <div>
               <dt>连接</dt>

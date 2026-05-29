@@ -17,6 +17,7 @@ export type {
 } from "./types";
 
 export {
+  calculatePlaybackDrift,
   classifyDrift,
   createPlaybackSnapshot,
   estimateClockOffset,

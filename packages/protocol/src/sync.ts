@@ -38,6 +38,14 @@ export function projectMediaTime(snapshot: PlaybackSnapshot, roomTimeMs: number)
   return snapshot.anchorMediaTimeMs + elapsedMs * snapshot.playbackRate;
 }
 
+export function calculatePlaybackDrift(input: {
+  snapshot: PlaybackSnapshot;
+  roomTimeMs: number;
+  localMediaTimeMs: number;
+}): number {
+  return projectMediaTime(input.snapshot, input.roomTimeMs) - input.localMediaTimeMs;
+}
+
 export function classifyDrift(driftMs: number): {
   correction: DriftCorrection;
   temporaryRate: number;
@@ -107,4 +115,3 @@ function hashString(value: string): string {
 
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
-
